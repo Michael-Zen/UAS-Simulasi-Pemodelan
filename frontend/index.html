@@ -160,6 +160,46 @@
                     </div>
                 </div>
 
+                <div class="chart-card chart-full telemetry-card" id="telemetry-panel">
+                    <h3>Telemetry Playback</h3>
+                    <div class="telemetry-toolbar">
+                        <button class="btn-primary telemetry-btn" id="btn-telemetry-play" type="button">Play</button>
+                        <input type="range" id="telemetry-scrub" class="slider-input telemetry-scrub" min="0" max="0" value="0" step="1" aria-label="Telemetry frame scrubber">
+                        <div class="telemetry-frame" id="telemetry-frame-label">Frame 0 / 0</div>
+                    </div>
+                    <div class="telemetry-grid">
+                        <div class="telemetry-map-wrap">
+                            <canvas id="minimap-canvas" width="560" height="320"></canvas>
+                            <div class="telemetry-sampling" id="telemetry-sampling">Sampling: -</div>
+                        </div>
+                        <div class="telemetry-live-wrap">
+                            <div class="telemetry-kpis">
+                                <div class="telemetry-kpi"><span>Lap</span><strong id="telemetry-lap-value">-</strong></div>
+                                <div class="telemetry-kpi"><span>Time</span><strong id="telemetry-time-value">-</strong></div>
+                                <div class="telemetry-kpi"><span>Speed</span><strong id="telemetry-speed-value">-</strong></div>
+                                <div class="telemetry-kpi"><span>Compound</span><strong id="telemetry-compound-value">-</strong></div>
+                            </div>
+
+                            <div class="telemetry-bar-group">
+                                <label>Throttle <span id="telemetry-throttle-value">0%</span></label>
+                                <div class="telemetry-bar"><div id="telemetry-throttle-fill" class="telemetry-fill telemetry-fill-throttle" style="width:0%"></div></div>
+                            </div>
+
+                            <div class="telemetry-bar-group">
+                                <label>Brake <span id="telemetry-brake-value">0%</span></label>
+                                <div class="telemetry-bar"><div id="telemetry-brake-fill" class="telemetry-fill telemetry-fill-brake" style="width:0%"></div></div>
+                            </div>
+
+                            <div class="telemetry-bar-group">
+                                <label>Tire Health <span id="telemetry-health-value">0%</span></label>
+                                <div class="telemetry-bar"><div id="telemetry-health-fill" class="telemetry-fill telemetry-fill-health" style="width:0%"></div></div>
+                            </div>
+
+                            <div class="telemetry-temp" id="telemetry-temp-value">Tyre Temp: -</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="data-table-wrap">
                     <h3>Data Lap-by-Lap</h3>
                     <div class="table-scroll">

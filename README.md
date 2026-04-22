@@ -29,4 +29,12 @@ Proyek ini merapikan simulator strategi pit stop Formula 1 menjadi struktur yang
 └── requirements.txt
 ```
 
+## Catatan track map telemetry
+
+- Endpoint `POST /api/simulate/telemetry` sekarang mendukung track map non-oval yang lebih realistis.
+- Sirkuit dengan layout khusus saat ini: `Monaco`, `Spa`, `Silverstone`, `Monza`, `Bahrain`, dan `Suzuka`.
+- Sirkuit lain tetap memakai fallback oval agar minimap selalu tersedia.
+- Geometri `Monaco` memakai turunan `monaco-6.svg` dari repositori `julesr0y/f1-circuits-svg` (lisensi CC BY 4.0).
+- Geometri `Spa`, `Silverstone`, `Monza`, `Bahrain`, dan `Suzuka` juga memakai sumber yang sama melalui data `_external/generated_track_points.json`.
+
 
