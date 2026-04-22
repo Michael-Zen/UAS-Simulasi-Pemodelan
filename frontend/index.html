@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>F1 Pit Stop Strategy Simulator</title>
+    <meta name="description" content="Simulasi dan analisis strategi pit stop Formula 1 berdasarkan model degradasi ban — Silverstone Circuit">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    
+    <!-- CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- ========== HEADER ========== -->
+    <header id="app-header">
+        <div class="header-glow"></div>
+        <div class="header-content">
+            <div class="header-left">
+                <h1 id="app-title">
+                    <span class="title-accent">F1</span> PIT STOP SIMULATOR
+                </h1>
+                <p class="header-subtitle">Simulasi Strategi Pit Stop &bull; Analisis Degradasi Ban</p>
+                <div class="header-controls">
+                    <div class="control-group control-group-compact">
+                        <label for="circuit-select">Pilih Sirkuit</label>
+                        <select id="circuit-select" class="select-input">
+                            <option value="">Loading circuits...</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="circuit-badge" id="circuit-info">
+                    <div class="badge-label">CIRCUIT</div>
+                    <div class="badge-value" id="circuit-name">Loading...</div>
+                </div>
+                <div class="circuit-badge">
+                    <div class="badge-label">LAPS</div>
+                    <div class="badge-value" id="total-laps">—</div>
+                </div>
+                <div class="circuit-badge">
+                    <div class="badge-label">BASE TIME</div>
+                    <div class="badge-value" id="base-time">—</div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- ========== NAVIGATION TABS ========== -->
+    <nav id="main-nav">
+        <div class="nav-track"></div>
+        <button class="nav-tab active" data-tab="degradation" id="tab-degradation">
+            <span class="tab-icon">&#9679;</span>
+            <span class="tab-label">Tire Degradation</span>
+        </button>
+        <button class="nav-tab" data-tab="simulator" id="tab-simulator">
+            <span class="tab-icon">&#9654;</span>
+            <span class="tab-label">Strategy Simulator</span>
+        </button>
+        <button class="nav-tab" data-tab="comparison" id="tab-comparison">
+            <span class="tab-icon">&#9776;</span>
+            <span class="tab-label">Strategy Comparison</span>
+        </button>
+        <button class="nav-tab" data-tab="montecarlo" id="tab-montecarlo">
+            <span class="tab-icon">&#9733;</span>
+            <span class="tab-label">Monte Carlo Analysis</span>
+        </button>
+    </nav>
+
+    <!-- ========== MAIN CONTENT ========== -->
+    <main id="main-content">
+
+        <!-- ===== TAB 1: TIRE DEGRADATION ===== -->
+        <section class="tab-panel active" id="panel-degradation">
+            <div class="section-header">
+                <h2>Tire Degradation Model</h2>
+                <p class="section-desc">Kurva degradasi grip dan lap time untuk setiap compound ban (Soft / Medium / Hard)</p>
+            </div>
+            
+            <div class="compound-toggles" id="compound-toggles">
+                <label class="toggle-chip toggle-soft active" id="toggle-soft">
+                    <input type="checkbox" checked data-compound="Soft"> Soft
+                </label>
+                <label class="toggle-chip toggle-medium active" id="toggle-medium">
+                    <input type="checkbox" checked data-compound="Medium"> Medium
+                </label>
+                <label class="toggle-chip toggle-hard active" id="toggle-hard">
+                    <input type="checkbox" checked data-compound="Hard"> Hard
+                </label>
+            </div>
+
+            <!-- Formula box -->
+            <div class="formula-box">
+                <div class="formula-title">Model Degradasi</div>
+                <code>grip(age) = initial_grip - deg_rate &times; age<sup>1.3</sup></code><br>
+                <code>if age &gt; cliff_point: grip -= cliff_penalty &times; (age - cliff_point)&sup2;</code><br>
+                <code>lap_time = base_time / grip</code>
+            </div>
+
+            <div class="charts-row">
+                <div class="chart-card">
+                    <h3>Grip vs Tire Age</h3>
+                    <canvas id="chart-grip"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h3>Lap Time vs Tire Age</h3>
+                    <canvas id="chart-laptime-deg"></canvas>
+                </div>
+            </div>
+
+            <!-- Compound info cards -->
+            <div class="compound-cards" id="compound-cards"></div>
+        </section>
+
+        <!-- ===== TAB 2: STRATEGY SIMULATOR ===== -->
+        <section class="tab-panel" id="panel-simulator">
+            <div class="section-header">
+                <h2>Strategy Simulator</h2>
+                <p class="section-desc">Pilih strategi dan jalankan simulasi deterministik untuk melihat lap time per lap</p>
+            </div>
+
+            <div class="sim-controls">
+                <div class="control-group">
+                    <label for="strategy-select">Pilih Strategi:</label>
+                    <select id="strategy-select" class="select-input"></select>
+                </div>
+                <button class="btn-primary" id="btn-simulate">
+                    <span class="btn-icon">&#9654;</span> Run Simulation
+                </button>
+            </div>
+
+            <!-- Strategy stint visual -->
+            <div class="stint-visual" id="stint-visual"></div>
+
+            <!-- Results -->
+            <div class="sim-results hidden" id="sim-results">
+                <div class="result-highlight" id="sim-highlight"></div>
+                
+                <div class="chart-card chart-full">
+                    <h3>Lap Time Progression</h3>
+                    <canvas id="chart-sim-laptime"></canvas>
+                </div>
+
+                <div class="charts-row">
+                    <div class="chart-card">
+                        <h3>Grip Progression</h3>
+                        <canvas id="chart-sim-grip"></canvas>
+                    </div>
+                    <div class="chart-card">
+                        <h3>Cumulative Race Time</h3>
+                        <canvas id="chart-sim-cumulative"></canvas>
+                    </div>
+                </div>
+
+                <div class="data-table-wrap">
+                    <h3>Data Lap-by-Lap</h3>
+                    <div class="table-scroll">
+                        <table class="data-table" id="sim-table">
+                            <thead>
+                                <tr>
+                                    <th>Lap</th>
+                                    <th>Compound</th>
+                                    <th>Tire Age</th>
+                                    <th>Grip</th>
+                                    <th>Lap Time</th>
+                                    <th>Cumulative</th>
+                                    <th>Pit</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sim-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===== TAB 3: STRATEGY COMPARISON ===== -->
+        <section class="tab-panel" id="panel-comparison">
+            <div class="section-header">
+                <h2>Strategy Comparison</h2>
+                <p class="section-desc">Pilih beberapa strategi untuk dibandingkan total race time-nya</p>
+            </div>
+
+            <div class="compare-controls">
+                <div class="checkbox-grid" id="compare-checkboxes"></div>
+                <button class="btn-primary" id="btn-compare">
+                    <span class="btn-icon">&#9776;</span> Compare Strategies
+                </button>
+            </div>
+
+            <div class="compare-results hidden" id="compare-results">
+                <div class="result-highlight" id="compare-highlight"></div>
+                
+                <div class="chart-card chart-full">
+                    <h3>Total Race Time Comparison</h3>
+                    <canvas id="chart-compare"></canvas>
+                </div>
+
+                <div class="data-table-wrap">
+                    <h3>Ranking Table</h3>
+                    <table class="data-table" id="compare-table">
+                        <thead>
+                            <tr>
+                                <th>Rank</th>
+                                <th>Strategy</th>
+                                <th>Pit Stops</th>
+                                <th>Total Time</th>
+                                <th>Avg Lap</th>
+                                <th>Fastest Lap</th>
+                                <th>Delta</th>
+                            </tr>
+                        </thead>
+                        <tbody id="compare-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===== TAB 4: MONTE CARLO ===== -->
+        <section class="tab-panel" id="panel-montecarlo">
+            <div class="section-header">
+                <h2>Monte Carlo Analysis</h2>
+                <p class="section-desc">Simulasi stokastik dengan variabilitas (pit time, safety car, lap noise) untuk analisis statistik</p>
+            </div>
+
+            <div class="mc-controls">
+                <div class="checkbox-grid" id="mc-checkboxes"></div>
+                <div class="slider-group">
+                    <label for="mc-iterations">Jumlah Iterasi: <span id="mc-iter-value">500</span></label>
+                    <input type="range" id="mc-iterations" min="100" max="1000" step="50" value="500" class="slider-input">
+                </div>
+                <button class="btn-primary btn-mc" id="btn-montecarlo">
+                    <span class="btn-icon">&#9733;</span> Run Monte Carlo
+                </button>
+            </div>
+
+            <div class="mc-loading hidden" id="mc-loading">
+                <div class="spinner"></div>
+                <p>Running Monte Carlo simulation... This may take a moment.</p>
+            </div>
+
+            <div class="mc-results hidden" id="mc-results">
+                <div class="result-highlight" id="mc-highlight"></div>
+
+                <div class="chart-card chart-full">
+                    <h3>Race Time Distribution (Box Plot)</h3>
+                    <canvas id="chart-mc-box"></canvas>
+                </div>
+                
+                <div class="chart-card chart-full">
+                    <h3>Win Probability</h3>
+                    <canvas id="chart-mc-winprob"></canvas>
+                </div>
+
+                <div class="data-table-wrap">
+                    <h3>Statistical Summary</h3>
+                    <table class="data-table" id="mc-table">
+                        <thead>
+                            <tr>
+                                <th>Rank</th>
+                                <th>Strategy</th>
+                                <th>Mean Time</th>
+                                <th>Std Dev</th>
+                                <th>95% CI</th>
+                                <th>Min</th>
+                                <th>Max</th>
+                                <th>Win Prob</th>
+                            </tr>
+                        </thead>
+                        <tbody id="mc-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ========== FOOTER ========== -->
+    <footer id="app-footer">
+        <p>Proyek Akhir &mdash; Simulasi dan Pemodelan &bull; Simulasi Strategi Pit Stop F1</p>
+    </footer>
+
+    <!-- JavaScript -->
+    <script src="script.js"></script>
+
+</body>
+</html>
