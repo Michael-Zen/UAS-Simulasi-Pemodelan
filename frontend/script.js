@@ -39,6 +39,10 @@ const telemetryState = {
     playing: false
 };
 
+let minimapRenderRequest = null;
+let minimapLastFrameIndex = -1;
+let carTrail = [];
+
 document.addEventListener('DOMContentLoaded', async () => {
     initTabs();
     await initializeApp();
@@ -742,6 +746,12 @@ function resetTelemetryState() {
     telemetryState.frameIndex = 0;
     telemetryState.timer = null;
     telemetryState.playing = false;
+    minimapLastFrameIndex = -1;
+    carTrail = [];
+    if (minimapRenderRequest) {
+        cancelAnimationFrame(minimapRenderRequest);
+        minimapRenderRequest = null;
+    }
 
     const scrub = document.getElementById('telemetry-scrub');
     const frameLabel = document.getElementById('telemetry-frame-label');
@@ -761,8 +771,7 @@ function resetTelemetryState() {
         sampling.textContent = 'Sampling: -';
     }
 
-    setTelemetryBars({ throttle: 0, brake: 0, tire_health_pct: 0, tire_health_color: '#666666' });
-    setTelemetryKpis({});
+    updateTelemetryWidgets({}, 0);
     drawMiniMap(null, null);
 }
 
@@ -808,6 +817,7 @@ function renderTelemetryPlayback(data) {
 
     if (points.length === 0) {
         drawMiniMap(telemetryState.trackMap, null);
+        updateTelemetryWidgets({}, 0);
         return;
     }
 
@@ -853,122 +863,554 @@ function drawTelemetryFrame(index) {
     document.getElementById('telemetry-scrub').value = safeIndex;
     document.getElementById('telemetry-frame-label').textContent = `Frame ${safeIndex + 1} / ${telemetryState.points.length}`;
 
-    setTelemetryBars(point);
-    setTelemetryKpis(point);
+    updateTelemetryWidgets(point, safeIndex);
     drawMiniMap(telemetryState.trackMap, point);
 }
 
-function setTelemetryBars(point) {
-    const throttlePct = Math.round((Number(point.throttle) || 0) * 100);
-    const brakePct = Math.round((Number(point.brake) || 0) * 100);
-    const healthPct = Math.round(Number(point.tire_health_pct) || 0);
-    const healthColor = point.tire_health_color || '#666666';
-
-    document.getElementById('telemetry-throttle-value').textContent = `${throttlePct}%`;
-    document.getElementById('telemetry-brake-value').textContent = `${brakePct}%`;
-    document.getElementById('telemetry-health-value').textContent = `${healthPct}%`;
-
-    document.getElementById('telemetry-throttle-fill').style.width = `${throttlePct}%`;
-    document.getElementById('telemetry-brake-fill').style.width = `${brakePct}%`;
-    document.getElementById('telemetry-health-fill').style.width = `${Math.max(0, Math.min(healthPct, 100))}%`;
-    document.getElementById('telemetry-health-fill').style.background = healthColor;
+function updateTelemetryWidgets(point, index = 0) {
+    updateTelemetryHeader(point, index);
+    updatePedalGauge('throttle', point.throttle);
+    updatePedalGauge('brake', point.brake);
+    updateTireCondition(point);
+    updateTireTemperature(point);
 }
 
-function setTelemetryKpis(point) {
+function updateTelemetryHeader(point, index) {
+    const circuit = telemetryState.trackMap?.circuit || currentCircuit || '-';
     const lap = point.lap ?? '-';
-    const speed = Number(point.speed_kmh || 0).toFixed(1);
-    const timeS = Number(point.t || 0).toFixed(1);
-    const compound = point.compound || '-';
-    const temp = Number(point.tire_temp_c || 0).toFixed(1);
+    const speed = Math.round(Number(point.speed_kmh) || 0);
+    const time = Number(point.t ?? point.time_s ?? (index * 0.5));
+    const pitText = (point.is_pit_lap || point.in_pit) ? 'PIT' : 'RACE';
 
-    document.getElementById('telemetry-lap-value').textContent = lap;
-    document.getElementById('telemetry-time-value').textContent = `${timeS}s`;
-    document.getElementById('telemetry-speed-value').textContent = `${speed} km/h`;
-    document.getElementById('telemetry-compound-value').textContent = compound;
-    document.getElementById('telemetry-temp-value').textContent = `Tyre Temp: ${temp} C`;
+    setText('telemetry-circuit-label', circuit);
+    setText('telemetry-lap-value', lap);
+    setText('telemetry-speed-value', speed);
+    setText('telemetry-time-value', `${time.toFixed(1)}s`);
+    setText('telemetry-pit-value', pitText);
+}
+
+function updatePedalGauge(kind, rawValue) {
+    const value = clamp(Number(rawValue) || 0, 0, 1);
+    const pct = Math.round(value * 100);
+    setText(`telemetry-${kind}-value`, `${pct}%`);
+
+    const fill = document.getElementById(`telemetry-${kind}-fill`);
+    if (fill) {
+        fill.style.height = `${pct}%`;
+    }
+}
+
+function updateTireCondition(point) {
+    const grip = Number(point.grip);
+    const healthFromGrip = Number.isFinite(grip)
+        ? Math.round(clamp(((grip - 0.5) / 0.5) * 100, 0, 100))
+        : null;
+    const healthPct = healthFromGrip ?? (Number.isFinite(Number(point.tire_health_pct))
+        ? Math.round(clamp(Number(point.tire_health_pct), 0, 100))
+        : 0);
+    const ringColor = point.tire_health_color || getTireHealthColor(healthPct);
+    const compound = point.compound || '-';
+    const compoundColor = getCompoundColor(compound);
+    const status = getTireHealthStatus(healthPct);
+    const tireAge = Number(point.tire_age);
+    const tireAgeLabel = Number.isFinite(tireAge) ? `${tireAge} lap` : '0 lap';
+
+    setText('telemetry-health-value', `${healthPct}%`);
+    setText('telemetry-health-status', status);
+    setText('telemetry-compound-value', compound);
+    setText('telemetry-tire-age-value', tireAgeLabel);
+
+    const ring = document.getElementById('telemetry-tire-ring');
+    if (ring) {
+        ring.style.setProperty('--ring-value', `${healthPct}%`);
+        ring.style.setProperty('--ring-color', ringColor);
+        ring.style.setProperty('--compound-color', compoundColor);
+    }
+}
+
+function updateTireTemperature(point) {
+    const temp = Number(point.tire_temp ?? point.tire_temp_c ?? point.temperature_c);
+    const safeTemp = Number.isFinite(temp) ? temp : 0;
+    const tempState = getTemperatureState(safeTemp);
+    const fillPct = clamp(((safeTemp - 50) / 90) * 100, 0, 100);
+
+    setText('telemetry-temp-value', `${safeTemp.toFixed(1)} \u00b0C`);
+    setText('telemetry-temp-status', tempState.label);
+
+    const fill = document.getElementById('telemetry-temp-fill');
+    if (fill) {
+        fill.style.height = `${fillPct}%`;
+        fill.style.background = tempState.color;
+    }
+
+    const widget = document.querySelector('.telemetry-temp-widget');
+    if (widget) {
+        widget.classList.toggle('temp-critical', tempState.label === 'CRITICAL');
+    }
+}
+
+function getTireHealthColor(pct) {
+    if (pct >= 80) {
+        return '#00e676';
+    }
+    if (pct >= 50) {
+        return '#ffd700';
+    }
+    if (pct >= 30) {
+        return '#ff9800';
+    }
+    return '#f44336';
+}
+
+function getTireHealthStatus(pct) {
+    if (pct >= 80) {
+        return 'PRIME';
+    }
+    if (pct >= 30) {
+        return 'WORN';
+    }
+    return 'CLIFF';
+}
+
+function getTemperatureState(temp) {
+    if (temp < 80) {
+        return { label: 'COLD', color: '#2196f3' };
+    }
+    if (temp <= 100) {
+        return { label: 'OPTIMAL', color: '#00e676' };
+    }
+    if (temp <= 115) {
+        return { label: 'HOT', color: '#ff9800' };
+    }
+    return { label: 'CRITICAL', color: '#f44336' };
+}
+
+function getCompoundColor(compound) {
+    const color = COMPOUND_COLORS[compound] || '#cccccc';
+    return color === '#FFFFFF' ? '#ffffff' : color;
+}
+
+function setText(id, value) {
+    const element = document.getElementById(id);
+    if (element) {
+        element.textContent = value;
+    }
+}
+
+function clamp(value, min, max) {
+    return Math.max(min, Math.min(value, max));
 }
 
 function drawMiniMap(trackMap, point) {
     const canvas = document.getElementById('minimap-canvas');
+    if (!canvas) {
+        return;
+    }
+    if (minimapRenderRequest) {
+        cancelAnimationFrame(minimapRenderRequest);
+    }
+    minimapRenderRequest = requestAnimationFrame(() => renderMiniMapFrame(canvas, trackMap, point));
+}
+
+function renderMiniMapFrame(canvas, trackMap, point) {
     const ctx = canvas.getContext('2d');
     const width = canvas.width;
     const height = canvas.height;
+    const path = trackMap?.path || [];
 
+    drawMinimapBackground(ctx, width, height);
+    if (!path.length) {
+        drawMissingTrackMessage(ctx);
+        setText('telemetry-circuit-label', currentCircuit || '-');
+        return;
+    }
+
+    const projectedPath = projectTrackPath(path, width, height, 20);
+    if (!projectedPath.length) {
+        return;
+    }
+
+    const progress = clamp(Number(point?.progress ?? point?.lap_progress ?? 0), 0, 1);
+    const progressIndex = point ? Math.floor(progress * (projectedPath.length - 1)) : 0;
+    const passedPath = projectedPath.slice(0, progressIndex + 1);
+
+    // Track layers: shadow, asphalt, sectors, passed lap, center markings.
+    drawTrackLayer(ctx, projectedPath, '#1a1a2e', 22, 0.95, true);
+    drawTrackLayer(ctx, projectedPath, '#2d2d3d', 14, 1, true);
+    drawSectorOverlay(ctx, projectedPath);
+    if (passedPath.length > 1) {
+        drawTrackLayer(ctx, passedPath, '#4a4a5e', 14, 0.85, false);
+    }
+    drawRacingLine(ctx, projectedPath);
+    drawCenterLine(ctx, projectedPath);
+    drawPitLane(ctx, projectedPath, trackMap);
+    drawCheckerFinishLine(ctx, projectedPath);
+    drawMinimapLegend(ctx, width, height);
+    drawOverlay(ctx, width, height, trackMap, point);
+
+    if (point) {
+        const carPoint = getCarCanvasPoint(point, projectedPath, progressIndex);
+        updateCarTrail(carPoint);
+        const heading = getCarHeading(carPoint, projectedPath, progressIndex);
+        const compoundColor = getCompoundColor(point.compound || 'Hard');
+        drawExhaustTrail(ctx, carTrail, compoundColor);
+        drawThrottleParticles(ctx, carPoint, heading, point);
+        drawCarF1(ctx, carPoint, heading, compoundColor, point);
+    }
+    minimapRenderRequest = null;
+}
+
+function projectTrackPath(path, width, height, padding = 10) {
+    const numeric = path.map(pt => ({
+        x: Number(pt.x),
+        y: Number(pt.y)
+    })).filter(pt => Number.isFinite(pt.x) && Number.isFinite(pt.y));
+
+    if (!numeric.length) {
+        return [];
+    }
+
+    const xs = numeric.map(pt => pt.x);
+    const ys = numeric.map(pt => pt.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const sourceWidth = Math.max(maxX - minX, 0.001);
+    const sourceHeight = Math.max(maxY - minY, 0.001);
+    const drawableWidth = width - (padding * 2);
+    const drawableHeight = height - (padding * 2);
+    const scale = Math.min(drawableWidth / sourceWidth, drawableHeight / sourceHeight);
+    const offsetX = (width - (sourceWidth * scale)) / 2;
+    const offsetY = (height - (sourceHeight * scale)) / 2;
+
+    return numeric.map(pt => ({
+        sourceX: pt.x,
+        sourceY: pt.y,
+        x: offsetX + ((pt.x - minX) * scale),
+        y: offsetY + ((pt.y - minY) * scale)
+    }));
+}
+
+function drawMinimapBackground(ctx, width, height) {
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = '#0f1024';
+    ctx.fillStyle = '#0a0a14';
     ctx.fillRect(0, 0, width, height);
 
-    const path = trackMap?.path || [];
-    if (!path.length) {
-        ctx.fillStyle = '#a0a0c0';
-        ctx.font = '14px Inter';
-        ctx.fillText('Track map unavailable', 20, 32);
+    // Subtle game-strategy grid dots.
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.055)';
+    for (let x = 10; x < width; x += 20) {
+        for (let y = 10; y < height; y += 20) {
+            ctx.beginPath();
+            ctx.arc(x, y, 1, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+    ctx.restore();
+}
+
+function drawMissingTrackMessage(ctx) {
+    ctx.fillStyle = '#a0a0c0';
+    ctx.font = "600 14px 'Orbitron', monospace";
+    ctx.fillText('Track map unavailable', 20, 32);
+}
+
+function drawTrackLayer(ctx, points, color, width, alpha = 1, closePath = false, dash = []) {
+    if (!points.length) {
         return;
     }
-
-    const margin = 24;
-    const toCanvasX = x => margin + (x * (width - (2 * margin)));
-    const toCanvasY = y => margin + (y * (height - (2 * margin)));
-
-    const isTightTrack = (trackMap?.circuit === 'Monaco');
-    const outerStrokeWidth = isTightTrack ? 13 : 16;
-    const innerStrokeWidth = isTightTrack ? 2.2 : 2.5;
-
-    ctx.strokeStyle = '#3a3f64';
-    ctx.lineWidth = outerStrokeWidth;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
+    ctx.setLineDash(dash);
+    traceTrackPath(ctx, points, closePath);
+    ctx.stroke();
+    ctx.restore();
+}
+
+function traceTrackPath(ctx, points, closePath = false) {
     ctx.beginPath();
-    path.forEach((pt, idx) => {
-        const x = toCanvasX(Number(pt.x));
-        const y = toCanvasY(Number(pt.y));
+    points.forEach((pt, idx) => {
         if (idx === 0) {
-            ctx.moveTo(x, y);
+            ctx.moveTo(pt.x, pt.y);
         } else {
-            ctx.lineTo(x, y);
+            ctx.lineTo(pt.x, pt.y);
         }
     });
-    ctx.closePath();
-    ctx.stroke();
-
-    ctx.strokeStyle = '#9ea7d4';
-    ctx.lineWidth = innerStrokeWidth;
-    ctx.beginPath();
-    path.forEach((pt, idx) => {
-        const x = toCanvasX(Number(pt.x));
-        const y = toCanvasY(Number(pt.y));
-        if (idx === 0) {
-            ctx.moveTo(x, y);
-        } else {
-            ctx.lineTo(x, y);
-        }
-    });
-    ctx.closePath();
-    ctx.stroke();
-
-    if (trackMap?.circuit) {
-        const source = trackMap?.source || 'unknown';
-        ctx.fillStyle = '#a0a0c0';
-        ctx.font = '12px Inter';
-        ctx.fillText(`${trackMap.circuit} | ${source}`, 18, height - 14);
+    if (closePath) {
+        ctx.closePath();
     }
+}
 
-    if (!point) {
+function drawSectorOverlay(ctx, points) {
+    const sectorColors = ['#00d2ff', '#8b5cf6', '#e8002d'];
+    const segmentSize = Math.floor(points.length / 3);
+    sectorColors.forEach((color, sector) => {
+        const start = sector * segmentSize;
+        const end = sector === 2 ? points.length : (sector + 1) * segmentSize + 1;
+        drawTrackLayer(ctx, points.slice(start, end), color, 7, 0.4);
+    });
+}
+
+function drawRacingLine(ctx, points) {
+    drawTrackLayer(ctx, points, 'rgba(255, 200, 0, 0.15)', 2, 1, true);
+}
+
+function drawCenterLine(ctx, points) {
+    drawTrackLayer(ctx, points, 'rgba(255, 255, 255, 0.72)', 1.5, 1, true, [8, 6]);
+}
+
+function drawPitLane(ctx, points, trackMap) {
+    const entry = Number(trackMap?.pit_entry_progress);
+    const exit = Number(trackMap?.pit_exit_progress);
+    if (!Number.isFinite(entry) || !Number.isFinite(exit) || points.length < 4) {
         return;
     }
 
-    const lapProgress = Math.max(0, Math.min(Number(point.lap_progress || 0), 0.99999));
-    const idx = Math.floor(lapProgress * path.length);
-    const carPt = path[idx] || path[0];
-    const carX = toCanvasX(Number(carPt.x));
-    const carY = toCanvasY(Number(carPt.y));
+    const pitSegment = getProgressSegment(points, clamp(entry, 0, 1), clamp(exit, 0, 1));
+    const pitLane = offsetPath(pitSegment, 15);
+    drawTrackLayer(ctx, pitLane, '#11111c', 8, 0.95);
+    drawTrackLayer(ctx, pitLane, '#ffd700', 2, 0.8, false, [6, 6]);
+}
 
-    ctx.fillStyle = point.tire_health_color || '#00d2ff';
+function getProgressSegment(points, startProgress, endProgress) {
+    const startIndex = Math.floor(startProgress * (points.length - 1));
+    const endIndex = Math.floor(endProgress * (points.length - 1));
+    if (endIndex >= startIndex) {
+        return points.slice(startIndex, endIndex + 1);
+    }
+    return [...points.slice(startIndex), ...points.slice(0, endIndex + 1)];
+}
+
+function offsetPath(points, distance) {
+    return points.map((pt, index) => {
+        const prev = points[Math.max(index - 1, 0)];
+        const next = points[Math.min(index + 1, points.length - 1)];
+        const angle = Math.atan2(next.y - prev.y, next.x - prev.x) + (Math.PI / 2);
+        return {
+            ...pt,
+            x: pt.x + Math.cos(angle) * distance,
+            y: pt.y + Math.sin(angle) * distance
+        };
+    });
+}
+
+function drawCheckerFinishLine(ctx, points) {
+    if (points.length < 2) {
+        return;
+    }
+    const start = points[0];
+    const next = points[1];
+    const angle = Math.atan2(next.y - start.y, next.x - start.x) + (Math.PI / 2);
+    const cells = 6;
+    const cellSize = 4;
+    const totalWidth = cells * cellSize;
+
+    ctx.save();
+    ctx.translate(start.x, start.y);
+    ctx.rotate(angle);
+    for (let i = 0; i < cells; i += 1) {
+        ctx.fillStyle = i % 2 === 0 ? '#ffffff' : '#05050a';
+        ctx.fillRect((-totalWidth / 2) + (i * cellSize), -5, cellSize, 5);
+        ctx.fillStyle = i % 2 === 0 ? '#05050a' : '#ffffff';
+        ctx.fillRect((-totalWidth / 2) + (i * cellSize), 0, cellSize, 5);
+    }
+    ctx.restore();
+}
+
+function getCarCanvasPoint(point, projectedPath, progressIndex) {
+    const rawX = Number(point.x);
+    const rawY = Number(point.y);
+    if (Number.isFinite(rawX) && Number.isFinite(rawY)) {
+        let closest = projectedPath[progressIndex] || projectedPath[0];
+        let bestDistance = Infinity;
+        projectedPath.forEach(projected => {
+            const distance = Math.hypot(projected.sourceX - rawX, projected.sourceY - rawY);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                closest = projected;
+            }
+        });
+        return closest;
+    }
+    return projectedPath[progressIndex] || projectedPath[0];
+}
+
+function updateCarTrail(carPoint) {
+    const currentFrame = telemetryState.frameIndex;
+    if (currentFrame <= minimapLastFrameIndex || currentFrame - minimapLastFrameIndex > 2) {
+        carTrail = [];
+    }
+    if (currentFrame !== minimapLastFrameIndex) {
+        carTrail.push({ x: carPoint.x, y: carPoint.y });
+        carTrail = carTrail.slice(-15);
+        minimapLastFrameIndex = currentFrame;
+    }
+}
+
+function getCarHeading(carPoint, projectedPath, progressIndex) {
+    const previous = carTrail.length > 1 ? carTrail[carTrail.length - 2] : null;
+    if (previous && Math.hypot(carPoint.x - previous.x, carPoint.y - previous.y) > 0.1) {
+        return Math.atan2(carPoint.y - previous.y, carPoint.x - previous.x);
+    }
+    const next = projectedPath[Math.min(progressIndex + 1, projectedPath.length - 1)] || carPoint;
+    return Math.atan2(next.y - carPoint.y, next.x - carPoint.x);
+}
+
+function drawExhaustTrail(ctx, trail, compoundColor) {
+    const previousPoints = trail.slice(0, -1).slice(-12);
+    previousPoints.forEach((pt, index) => {
+        const fade = (index + 1) / previousPoints.length;
+        ctx.save();
+        ctx.globalAlpha = 0.08 + (fade * 0.22);
+        ctx.fillStyle = compoundColor;
+        ctx.shadowColor = compoundColor;
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 2 + (fade * 3.5), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    });
+}
+
+function drawThrottleParticles(ctx, carPoint, heading, point) {
+    const throttle = Number(point.throttle) || 0;
+    if (throttle <= 0.7) {
+        return;
+    }
+    ctx.save();
+    for (let i = 0; i < 5; i += 1) {
+        const spread = (Math.random() - 0.5) * 9;
+        const distance = 14 + (Math.random() * 18);
+        const x = carPoint.x - Math.cos(heading) * distance + Math.cos(heading + Math.PI / 2) * spread;
+        const y = carPoint.y - Math.sin(heading) * distance + Math.sin(heading + Math.PI / 2) * spread;
+        ctx.globalAlpha = 0.25 + Math.random() * 0.45;
+        ctx.fillStyle = Math.random() > 0.5 ? '#ff9800' : '#f44336';
+        ctx.beginPath();
+        ctx.arc(x, y, 1.4 + Math.random() * 1.8, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.restore();
+}
+
+function drawCarF1(ctx, carPoint, angle, compoundColor, point) {
+    const isPit = Boolean(point.is_pit_lap || point.in_pit);
+    const glowColor = isPit ? '#ffd700' : compoundColor;
+
+    ctx.save();
+    ctx.translate(carPoint.x, carPoint.y);
+    ctx.rotate(angle);
+    ctx.shadowColor = glowColor;
+    ctx.shadowBlur = 12;
+
+    // Main slim F1 arrow body.
+    ctx.fillStyle = compoundColor;
     ctx.beginPath();
-    ctx.arc(carX, carY, 7, 0, Math.PI * 2);
+    ctx.moveTo(11, 0);
+    ctx.lineTo(3, -4);
+    ctx.lineTo(-8, -3);
+    ctx.lineTo(-10, 0);
+    ctx.lineTo(-8, 3);
+    ctx.lineTo(3, 4);
+    ctx.closePath();
     ctx.fill();
+
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1;
     ctx.stroke();
+
+    // Wings and cockpit details.
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(7, -5);
+    ctx.lineTo(7, 5);
+    ctx.moveTo(-8, -6);
+    ctx.lineTo(-8, 6);
+    ctx.stroke();
+
+    ctx.fillStyle = '#08080e';
+    ctx.beginPath();
+    ctx.arc(1, 0, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    if ((Number(point.brake) || 0) > 0.3) {
+        ctx.fillStyle = '#ff3d00';
+        ctx.shadowColor = '#ff3d00';
+        ctx.shadowBlur = 8;
+        [-4, 4].forEach(offset => {
+            ctx.beginPath();
+            ctx.arc(4, offset, 2.2, 0, Math.PI * 2);
+            ctx.fill();
+        });
+    }
+    ctx.restore();
+
+    if (isPit) {
+        drawPitLabel(ctx, carPoint);
+    }
+}
+
+function drawPitLabel(ctx, carPoint) {
+    ctx.save();
+    ctx.font = "700 11px 'Orbitron', monospace";
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffd700';
+    ctx.shadowColor = '#ffd700';
+    ctx.shadowBlur = 10;
+    ctx.fillText('PIT IN', carPoint.x, carPoint.y - 18);
+    ctx.restore();
+}
+
+function drawOverlay(ctx, width, height, trackMap, point) {
+    const circuit = trackMap?.circuit || currentCircuit || '-';
+    const lap = point?.lap ?? '-';
+    const totalLaps = document.getElementById('total-laps')?.textContent || '-';
+    const speed = Math.round(Number(point?.speed_kmh) || 0);
+
+    ctx.save();
+    ctx.font = "800 15px 'Orbitron', monospace";
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+    ctx.shadowBlur = 8;
+    ctx.fillText(`${circuit}  LAP ${lap} / ${totalLaps}`, 16, 26);
+
+    const speedText = `${speed} km/h`;
+    ctx.font = "800 18px 'Orbitron', monospace";
+    const speedWidth = ctx.measureText(speedText).width + 24;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.58)';
+    ctx.fillRect(width - speedWidth - 14, 12, speedWidth, 34);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.strokeRect(width - speedWidth - 14, 12, speedWidth, 34);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(speedText, width - speedWidth - 2, 35);
+    ctx.restore();
+}
+
+function drawMinimapLegend(ctx, width, height) {
+    const items = [
+        { label: 'S', color: COMPOUND_COLORS.Soft },
+        { label: 'M', color: COMPOUND_COLORS.Medium },
+        { label: 'H', color: COMPOUND_COLORS.Hard }
+    ];
+
+    ctx.save();
+    ctx.font = "700 10px 'Orbitron', monospace";
+    items.forEach((item, index) => {
+        const x = 16 + (index * 34);
+        const y = height - 18;
+        ctx.fillStyle = item.color;
+        ctx.beginPath();
+        ctx.arc(x, y - 3, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(item.label, x + 8, y);
+    });
+    ctx.restore();
 }
 

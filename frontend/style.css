@@ -666,6 +666,8 @@ body::before {
 /* ======================== TELEMETRY PANEL ======================== */
 .telemetry-card {
     margin-bottom: 1.5rem;
+    background: #060608;
+    border-color: rgba(232, 0, 45, 0.24);
 }
 
 .telemetry-toolbar {
@@ -691,25 +693,59 @@ body::before {
     text-align: right;
 }
 
-.telemetry-grid {
+.telemetry-dashboard {
     display: grid;
-    grid-template-columns: 1.35fr 1fr;
+    grid-template-columns: minmax(300px, 1.25fr) minmax(220px, 0.75fr) repeat(4, minmax(145px, 1fr));
     gap: 1rem;
+    align-items: stretch;
 }
 
 .telemetry-map-wrap {
-    background: var(--bg-input);
+    background: linear-gradient(145deg, #090910, #11111f);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     padding: 0.75rem;
+    min-height: 100%;
+}
+
+.telemetry-map-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.65rem;
+}
+
+.telemetry-map-head > div {
+    min-width: 0;
+}
+
+.telemetry-label {
+    display: block;
+    font-family: 'Orbitron', monospace;
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+}
+
+.telemetry-map-head strong {
+    display: block;
+    margin-top: 0.1rem;
+    color: var(--text-primary);
+    font-family: 'Orbitron', monospace;
+    font-size: 0.95rem;
+    overflow-wrap: anywhere;
 }
 
 #minimap-canvas {
     width: 100%;
     height: auto;
     display: block;
-    border-radius: 6px;
-    background: linear-gradient(160deg, #12122b, #0f1024);
+    border-radius: 8px;
+    background-color: #0a0a14;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+    background-size: 20px 20px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .telemetry-sampling {
@@ -718,84 +754,214 @@ body::before {
     color: var(--text-muted);
 }
 
-.telemetry-live-wrap {
-    background: var(--bg-input);
+.telemetry-widget,
+.telemetry-speed-card {
+    background: linear-gradient(145deg, #0c0c14, #151522);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
-    padding: 0.9rem;
+    padding: 1rem;
+    min-height: 230px;
+}
+
+.telemetry-speed-card {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    border-color: rgba(232, 0, 45, 0.25);
 }
 
-.telemetry-kpis {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.5rem;
+.telemetry-speed-card strong {
+    margin-top: 0.25rem;
+    font-family: 'Orbitron', monospace;
+    font-size: 3.2rem;
+    line-height: 1;
+    color: #ffffff;
+    text-shadow: 0 0 22px rgba(232, 0, 45, 0.35);
 }
 
-.telemetry-kpi {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
-    padding: 0.45rem 0.55rem;
-}
-
-.telemetry-kpi span {
-    display: block;
-    font-size: 0.68rem;
-    color: var(--text-muted);
-    letter-spacing: 0.6px;
-    text-transform: uppercase;
-}
-
-.telemetry-kpi strong {
-    display: block;
+.telemetry-speed-card small {
     margin-top: 0.2rem;
     font-family: 'Orbitron', monospace;
-    font-size: 0.92rem;
-    color: var(--text-primary);
+    color: var(--f1-red-light);
+    letter-spacing: 1px;
 }
 
-.telemetry-bar-group label {
+.telemetry-speed-meta {
     display: flex;
-    justify-content: space-between;
-    font-size: 0.78rem;
+    gap: 0.65rem;
+    margin-top: 0.9rem;
     color: var(--text-secondary);
-    margin-bottom: 0.25rem;
+    font-size: 0.74rem;
 }
 
-.telemetry-bar {
-    width: 100%;
-    height: 12px;
-    border-radius: 999px;
-    background: #0f1024;
+.telemetry-speed-meta span:last-child {
+    color: var(--accent-cyan);
+    font-weight: 700;
+}
+
+.telemetry-pedal-widget {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 0.65rem;
+}
+
+.telemetry-pedal-widget strong {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.5rem;
+}
+
+.pedal-bar {
+    position: relative;
+    width: 54px;
+    height: 132px;
+    border-radius: 8px;
+    background: #08080e;
     border: 1px solid var(--border-subtle);
     overflow: hidden;
 }
 
-.telemetry-fill {
-    height: 100%;
-    transition: width 120ms linear;
+.pedal-fill {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 0%;
+    transition: height 160ms linear;
 }
 
-.telemetry-fill-throttle {
-    background: linear-gradient(90deg, #1f9f5e, #45d389);
+.pedal-fill-throttle {
+    background: linear-gradient(0deg, #0b8f4d, #00e676);
+    box-shadow: 0 0 18px rgba(0, 230, 118, 0.35);
 }
 
-.telemetry-fill-brake {
-    background: linear-gradient(90deg, #8f1320, #e94560);
+.pedal-fill-brake {
+    background: linear-gradient(0deg, #a30b1e, #ff304f);
+    box-shadow: 0 0 18px rgba(244, 67, 54, 0.36);
 }
 
-.telemetry-fill-health {
-    background: linear-gradient(90deg, #e94560, #45d389);
-}
-
-.telemetry-temp {
-    margin-top: 0.2rem;
+.pedal-name {
     font-family: 'Orbitron', monospace;
-    font-size: 0.85rem;
-    color: var(--accent-cyan);
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    letter-spacing: 1.4px;
+}
+
+.telemetry-tire-widget,
+.telemetry-temp-widget {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 0.7rem;
+}
+
+.tire-ring {
+    --ring-value: 0%;
+    --ring-color: #666666;
+    --compound-color: #666666;
+    width: 118px;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    padding: 8px;
+    background:
+        radial-gradient(circle at center, #101018 58%, transparent 59%),
+        conic-gradient(var(--ring-color) var(--ring-value), #20202c 0);
+    border: 2px solid var(--compound-color);
+    box-shadow: 0 0 18px rgba(255, 255, 255, 0.06);
+    transition: background 160ms linear, border-color 160ms linear;
+}
+
+.tire-ring-inner {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: #08080e;
+}
+
+.tire-ring-inner strong {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.35rem;
+}
+
+.tire-ring-inner span {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.62rem;
+    color: var(--text-secondary);
+    letter-spacing: 1px;
+}
+
+.tire-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.tire-meta strong {
+    font-family: 'Orbitron', monospace;
+    color: var(--text-primary);
+}
+
+.tire-meta span {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+
+.telemetry-temp-widget > strong {
+    font-family: 'Orbitron', monospace;
+    font-size: 1.55rem;
+    color: #ffffff;
+}
+
+.temp-body {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.temp-bar {
+    position: relative;
+    width: 24px;
+    height: 128px;
+    border-radius: 999px;
+    background: #08080e;
+    border: 1px solid var(--border-subtle);
+    overflow: hidden;
+}
+
+.temp-fill {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 0%;
+    background: #2196f3;
+    transition: height 180ms linear, background-color 180ms linear;
+}
+
+#telemetry-temp-status {
+    min-width: 70px;
+    font-family: 'Orbitron', monospace;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    letter-spacing: 1px;
+}
+
+.telemetry-temp-widget.temp-critical {
+    border-color: rgba(244, 67, 54, 0.75);
+    animation: temp-alert 0.75s ease-in-out infinite alternate;
+}
+
+@keyframes temp-alert {
+    from { box-shadow: 0 0 8px rgba(244, 67, 54, 0.12); }
+    to { box-shadow: 0 0 24px rgba(244, 67, 54, 0.42); }
 }
 
 /* ======================== STINT VISUAL ======================== */
@@ -1025,7 +1191,9 @@ body::before {
     #main-content { padding: 1rem; }
     .checkbox-grid { grid-template-columns: 1fr; }
     .highlight-stats { flex-wrap: wrap; gap: 1rem; }
-    .telemetry-grid { grid-template-columns: 1fr; }
+    .telemetry-dashboard { grid-template-columns: 1fr 1fr; }
+    .telemetry-map-wrap,
+    .telemetry-speed-card { grid-column: 1 / -1; }
     .telemetry-toolbar { flex-wrap: wrap; }
     .telemetry-frame { text-align: left; }
 }
@@ -1035,6 +1203,8 @@ body::before {
     .nav-tab .tab-icon { font-size: 1.2rem; }
     .nav-tab { padding: 1rem; }
     #app-title { font-size: 1.1rem; letter-spacing: 1px; }
+    .telemetry-dashboard { grid-template-columns: 1fr; }
+    .telemetry-speed-card strong { font-size: 2.5rem; }
 }
 
 /* ======================== SCROLLBAR ======================== */

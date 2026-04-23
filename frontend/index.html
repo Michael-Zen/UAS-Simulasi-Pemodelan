@@ -167,35 +167,73 @@
                         <input type="range" id="telemetry-scrub" class="slider-input telemetry-scrub" min="0" max="0" value="0" step="1" aria-label="Telemetry frame scrubber">
                         <div class="telemetry-frame" id="telemetry-frame-label">Frame 0 / 0</div>
                     </div>
-                    <div class="telemetry-grid">
+                    <div class="telemetry-dashboard">
                         <div class="telemetry-map-wrap">
+                            <div class="telemetry-map-head">
+                                <div>
+                                    <span class="telemetry-label">Circuit</span>
+                                    <strong id="telemetry-circuit-label">-</strong>
+                                </div>
+                                <div>
+                                    <span class="telemetry-label">Lap</span>
+                                    <strong id="telemetry-lap-value">-</strong>
+                                </div>
+                            </div>
                             <canvas id="minimap-canvas" width="560" height="320"></canvas>
                             <div class="telemetry-sampling" id="telemetry-sampling">Sampling: -</div>
                         </div>
-                        <div class="telemetry-live-wrap">
-                            <div class="telemetry-kpis">
-                                <div class="telemetry-kpi"><span>Lap</span><strong id="telemetry-lap-value">-</strong></div>
-                                <div class="telemetry-kpi"><span>Time</span><strong id="telemetry-time-value">-</strong></div>
-                                <div class="telemetry-kpi"><span>Speed</span><strong id="telemetry-speed-value">-</strong></div>
-                                <div class="telemetry-kpi"><span>Compound</span><strong id="telemetry-compound-value">-</strong></div>
-                            </div>
 
-                            <div class="telemetry-bar-group">
-                                <label>Throttle <span id="telemetry-throttle-value">0%</span></label>
-                                <div class="telemetry-bar"><div id="telemetry-throttle-fill" class="telemetry-fill telemetry-fill-throttle" style="width:0%"></div></div>
+                        <div class="telemetry-speed-card">
+                            <span class="telemetry-label">Speed</span>
+                            <strong id="telemetry-speed-value">0</strong>
+                            <small>km/h</small>
+                            <div class="telemetry-speed-meta">
+                                <span id="telemetry-time-value">0.0s</span>
+                                <span id="telemetry-pit-value">RACE</span>
                             </div>
+                        </div>
 
-                            <div class="telemetry-bar-group">
-                                <label>Brake <span id="telemetry-brake-value">0%</span></label>
-                                <div class="telemetry-bar"><div id="telemetry-brake-fill" class="telemetry-fill telemetry-fill-brake" style="width:0%"></div></div>
+                        <div class="telemetry-widget telemetry-pedal-widget">
+                            <span class="telemetry-label">Throttle</span>
+                            <strong id="telemetry-throttle-value">0%</strong>
+                            <div class="pedal-bar">
+                                <div id="telemetry-throttle-fill" class="pedal-fill pedal-fill-throttle" style="height:0%"></div>
                             </div>
+                            <span class="pedal-name">GAS</span>
+                        </div>
 
-                            <div class="telemetry-bar-group">
-                                <label>Tire Health <span id="telemetry-health-value">0%</span></label>
-                                <div class="telemetry-bar"><div id="telemetry-health-fill" class="telemetry-fill telemetry-fill-health" style="width:0%"></div></div>
+                        <div class="telemetry-widget telemetry-pedal-widget">
+                            <span class="telemetry-label">Brake</span>
+                            <strong id="telemetry-brake-value">0%</strong>
+                            <div class="pedal-bar">
+                                <div id="telemetry-brake-fill" class="pedal-fill pedal-fill-brake" style="height:0%"></div>
                             </div>
+                            <span class="pedal-name">REM</span>
+                        </div>
 
-                            <div class="telemetry-temp" id="telemetry-temp-value">Tyre Temp: -</div>
+                        <div class="telemetry-widget telemetry-tire-widget">
+                            <span class="telemetry-label">Tire Cond.</span>
+                            <div class="tire-ring" id="telemetry-tire-ring" style="--ring-color:#666666; --compound-color:#666666; --ring-value:0%">
+                                <div class="tire-ring-inner">
+                                    <strong id="telemetry-health-value">0%</strong>
+                                    <span id="telemetry-health-status">CLIFF</span>
+                                </div>
+                            </div>
+                            <div class="tire-meta">
+                                <strong id="telemetry-compound-value">-</strong>
+                                <span id="telemetry-tire-age-value">0 lap</span>
+                            </div>
+                        </div>
+
+                        <div class="telemetry-widget telemetry-temp-widget">
+                            <span class="telemetry-label">Tire Temp</span>
+                            <strong id="telemetry-temp-value">0.0 &deg;C</strong>
+                            <div class="temp-body">
+                                <div class="temp-bar">
+                                    <div id="telemetry-temp-fill" class="temp-fill" style="height:0%"></div>
+                                </div>
+                                <span id="telemetry-temp-status">COLD</span>
+                            </div>
                         </div>
                     </div>
                 </div>
