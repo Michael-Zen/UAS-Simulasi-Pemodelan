@@ -741,11 +741,12 @@ body::before {
     width: 100%;
     height: auto;
     display: block;
-    border-radius: 8px;
+    border-radius: 6px;
     background-color: #0a0a14;
-    background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
-    background-size: 20px 20px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background-image: radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    background-size: 18px 18px;
+    border: 1px solid rgba(255, 50, 50, 0.2);
+    box-shadow: 0 0 30px rgba(0, 0, 50, 0.8);
 }
 
 .telemetry-sampling {

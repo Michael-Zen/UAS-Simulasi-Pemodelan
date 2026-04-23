@@ -41,7 +41,7 @@ const telemetryState = {
 
 let minimapRenderRequest = null;
 let minimapLastFrameIndex = -1;
-let carTrail = [];
+window.carTrail = window.carTrail || [];
 
 document.addEventListener('DOMContentLoaded', async () => {
     initTabs();
@@ -747,7 +747,7 @@ function resetTelemetryState() {
     telemetryState.timer = null;
     telemetryState.playing = false;
     minimapLastFrameIndex = -1;
-    carTrail = [];
+    window.carTrail = [];
     if (minimapRenderRequest) {
         cancelAnimationFrame(minimapRenderRequest);
         minimapRenderRequest = null;
@@ -1018,6 +1018,7 @@ function renderMiniMapFrame(canvas, trackMap, point) {
     const height = canvas.height;
     const path = trackMap?.path || [];
 
+    // Background: dark satellite-style base with dotted tactical grid and vignette.
     drawMinimapBackground(ctx, width, height);
     if (!path.length) {
         drawMissingTrackMessage(ctx);
@@ -1025,37 +1026,42 @@ function renderMiniMapFrame(canvas, trackMap, point) {
         return;
     }
 
-    const projectedPath = projectTrackPath(path, width, height, 20);
+    const projectedPath = projectTrackPath(path, width, height, 34);
     if (!projectedPath.length) {
         return;
     }
 
     const progress = clamp(Number(point?.progress ?? point?.lap_progress ?? 0), 0, 1);
-    const progressIndex = point ? Math.floor(progress * (projectedPath.length - 1)) : 0;
-    const passedPath = projectedPath.slice(0, progressIndex + 1);
+    const progressIndex = point ? Math.floor(progress * projectedPath.length) : 0;
+    const safeProgressIndex = Math.max(0, Math.min(progressIndex, projectedPath.length - 1));
+    const passedPath = projectedPath.slice(0, safeProgressIndex + 1);
 
-    // Track layers: shadow, asphalt, sectors, passed lap, center markings.
-    drawTrackLayer(ctx, projectedPath, '#1a1a2e', 22, 0.95, true);
-    drawTrackLayer(ctx, projectedPath, '#2d2d3d', 14, 1, true);
+    // Track: F1 Manager-style glow, red outside edge, green inside edge, asphalt center.
+    drawTrackHalo(ctx, projectedPath);
+    drawTrackLayer(ctx, projectedPath, 'rgba(255, 255, 255, 0.06)', 32, 1, true);
+    drawTrackLayer(ctx, projectedPath, '#f44336', 26, 1, true);
+    drawTrackLayer(ctx, projectedPath, '#1e2235', 22, 1, true);
+    drawTrackLayer(ctx, projectedPath, '#252840', 18, 1, true);
     drawSectorOverlay(ctx, projectedPath);
     if (passedPath.length > 1) {
-        drawTrackLayer(ctx, passedPath, '#4a4a5e', 14, 0.85, false);
+        drawTrackLayer(ctx, passedPath, 'rgba(255, 255, 100, 0.2)', 10, 1, false);
     }
-    drawRacingLine(ctx, projectedPath);
-    drawCenterLine(ctx, projectedPath);
+    drawTrackLayer(ctx, projectedPath, '#00c853', 14, 1, true);
+    drawTrackLayer(ctx, projectedPath, '#252840', 10, 1, true);
     drawPitLane(ctx, projectedPath, trackMap);
+    drawCenterLine(ctx, projectedPath);
     drawCheckerFinishLine(ctx, projectedPath);
     drawMinimapLegend(ctx, width, height);
     drawOverlay(ctx, width, height, trackMap, point);
 
     if (point) {
-        const carPoint = getCarCanvasPoint(point, projectedPath, progressIndex);
+        const carPoint = getCarCanvasPoint(projectedPath, safeProgressIndex);
+        const heading = getTrackHeading(projectedPath, safeProgressIndex);
+        const compoundColor = getF1ManagerCompoundColor(point.compound);
         updateCarTrail(carPoint);
-        const heading = getCarHeading(carPoint, projectedPath, progressIndex);
-        const compoundColor = getCompoundColor(point.compound || 'Hard');
-        drawExhaustTrail(ctx, carTrail, compoundColor);
-        drawThrottleParticles(ctx, carPoint, heading, point);
-        drawCarF1(ctx, carPoint, heading, compoundColor, point);
+        drawExhaustTrail(ctx, window.carTrail, compoundColor);
+        drawCarMarkers(ctx, carPoint, heading, point);
+        drawF1ManagerCar(ctx, carPoint, heading, compoundColor, point);
     }
     minimapRenderRequest = null;
 }
@@ -1094,20 +1100,27 @@ function projectTrackPath(path, width, height, padding = 10) {
 
 function drawMinimapBackground(ctx, width, height) {
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = '#0a0a14';
+    ctx.fillStyle = '#080c14';
     ctx.fillRect(0, 0, width, height);
 
-    // Subtle game-strategy grid dots.
+    // Dot grid pattern: subtle strategy-map texture.
     ctx.save();
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.055)';
-    for (let x = 10; x < width; x += 20) {
-        for (let y = 10; y < height; y += 20) {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+    for (let x = 9; x < width; x += 18) {
+        for (let y = 9; y < height; y += 18) {
             ctx.beginPath();
             ctx.arc(x, y, 1, 0, Math.PI * 2);
             ctx.fill();
         }
     }
     ctx.restore();
+
+    // Satellite-like vignette haze.
+    const gradient = ctx.createRadialGradient(width / 2, height / 2, 20, width / 2, height / 2, Math.max(width, height) * 0.62);
+    gradient.addColorStop(0, 'rgba(30, 40, 80, 0.3)');
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0.85)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
 }
 
 function drawMissingTrackMessage(ctx) {
@@ -1132,6 +1145,14 @@ function drawTrackLayer(ctx, points, color, width, alpha = 1, closePath = false,
     ctx.restore();
 }
 
+function drawTrackHalo(ctx, points) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(200, 220, 255, 0.16)';
+    ctx.shadowBlur = 28;
+    drawTrackLayer(ctx, points, 'rgba(200, 220, 255, 0.04)', 45, 1, true);
+    ctx.restore();
+}
+
 function traceTrackPath(ctx, points, closePath = false) {
     ctx.beginPath();
     points.forEach((pt, idx) => {
@@ -1147,21 +1168,21 @@ function traceTrackPath(ctx, points, closePath = false) {
 }
 
 function drawSectorOverlay(ctx, points) {
-    const sectorColors = ['#00d2ff', '#8b5cf6', '#e8002d'];
+    const sectorColors = [
+        'rgba(0, 150, 255, 0.15)',
+        'rgba(180, 0, 255, 0.15)',
+        'rgba(255, 50, 50, 0.15)'
+    ];
     const segmentSize = Math.floor(points.length / 3);
     sectorColors.forEach((color, sector) => {
         const start = sector * segmentSize;
         const end = sector === 2 ? points.length : (sector + 1) * segmentSize + 1;
-        drawTrackLayer(ctx, points.slice(start, end), color, 7, 0.4);
+        drawTrackLayer(ctx, points.slice(start, end), color, 18, 1);
     });
 }
 
-function drawRacingLine(ctx, points) {
-    drawTrackLayer(ctx, points, 'rgba(255, 200, 0, 0.15)', 2, 1, true);
-}
-
 function drawCenterLine(ctx, points) {
-    drawTrackLayer(ctx, points, 'rgba(255, 255, 255, 0.72)', 1.5, 1, true, [8, 6]);
+    drawTrackLayer(ctx, points, 'rgba(255, 255, 255, 0.25)', 1, 1, true, [6, 8]);
 }
 
 function drawPitLane(ctx, points, trackMap) {
@@ -1172,9 +1193,25 @@ function drawPitLane(ctx, points, trackMap) {
     }
 
     const pitSegment = getProgressSegment(points, clamp(entry, 0, 1), clamp(exit, 0, 1));
-    const pitLane = offsetPath(pitSegment, 15);
-    drawTrackLayer(ctx, pitLane, '#11111c', 8, 0.95);
-    drawTrackLayer(ctx, pitLane, '#ffd700', 2, 0.8, false, [6, 6]);
+    const pitLane = offsetPath(pitSegment, 12);
+    drawTrackLayer(ctx, pitLane, '#3a3f5c', 6, 1);
+    drawTrackLayer(ctx, pitLane, 'rgba(255, 255, 255, 0.35)', 1, 1, false, [4, 5]);
+    drawPitLaneLabel(ctx, pitLane);
+}
+
+function drawPitLaneLabel(ctx, points) {
+    if (points.length < 2) {
+        return;
+    }
+    const mid = points[Math.floor(points.length / 2)];
+    ctx.save();
+    ctx.font = "700 9px 'Orbitron', monospace";
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#a0a0c0';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.75)';
+    ctx.shadowBlur = 8;
+    ctx.fillText('PIT LANE', mid.x, mid.y - 8);
+    ctx.restore();
 }
 
 function getProgressSegment(points, startProgress, endProgress) {
@@ -1205,165 +1242,148 @@ function drawCheckerFinishLine(ctx, points) {
     }
     const start = points[0];
     const next = points[1];
-    const angle = Math.atan2(next.y - start.y, next.x - start.x) + (Math.PI / 2);
+    const heading = Math.atan2(next.y - start.y, next.x - start.x);
+    const perpAngle = heading + (Math.PI / 2);
     const cells = 6;
-    const cellSize = 4;
+    const cellSize = 8;
     const totalWidth = cells * cellSize;
 
     ctx.save();
     ctx.translate(start.x, start.y);
-    ctx.rotate(angle);
+    ctx.rotate(perpAngle);
     for (let i = 0; i < cells; i += 1) {
         ctx.fillStyle = i % 2 === 0 ? '#ffffff' : '#05050a';
-        ctx.fillRect((-totalWidth / 2) + (i * cellSize), -5, cellSize, 5);
+        ctx.fillRect((-totalWidth / 2) + (i * cellSize), -8, cellSize, 8);
         ctx.fillStyle = i % 2 === 0 ? '#05050a' : '#ffffff';
-        ctx.fillRect((-totalWidth / 2) + (i * cellSize), 0, cellSize, 5);
+        ctx.fillRect((-totalWidth / 2) + (i * cellSize), 0, cellSize, 8);
     }
     ctx.restore();
 }
 
-function getCarCanvasPoint(point, projectedPath, progressIndex) {
-    const rawX = Number(point.x);
-    const rawY = Number(point.y);
-    if (Number.isFinite(rawX) && Number.isFinite(rawY)) {
-        let closest = projectedPath[progressIndex] || projectedPath[0];
-        let bestDistance = Infinity;
-        projectedPath.forEach(projected => {
-            const distance = Math.hypot(projected.sourceX - rawX, projected.sourceY - rawY);
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                closest = projected;
-            }
-        });
-        return closest;
-    }
+function getCarCanvasPoint(projectedPath, progressIndex) {
     return projectedPath[progressIndex] || projectedPath[0];
 }
 
 function updateCarTrail(carPoint) {
     const currentFrame = telemetryState.frameIndex;
     if (currentFrame <= minimapLastFrameIndex || currentFrame - minimapLastFrameIndex > 2) {
-        carTrail = [];
+        window.carTrail = [];
     }
     if (currentFrame !== minimapLastFrameIndex) {
-        carTrail.push({ x: carPoint.x, y: carPoint.y });
-        carTrail = carTrail.slice(-15);
+        window.carTrail.push({ cx: carPoint.x, cy: carPoint.y });
+        window.carTrail = window.carTrail.slice(-20);
         minimapLastFrameIndex = currentFrame;
     }
 }
 
-function getCarHeading(carPoint, projectedPath, progressIndex) {
-    const previous = carTrail.length > 1 ? carTrail[carTrail.length - 2] : null;
-    if (previous && Math.hypot(carPoint.x - previous.x, carPoint.y - previous.y) > 0.1) {
-        return Math.atan2(carPoint.y - previous.y, carPoint.x - previous.x);
-    }
-    const next = projectedPath[Math.min(progressIndex + 1, projectedPath.length - 1)] || carPoint;
-    return Math.atan2(next.y - carPoint.y, next.x - carPoint.x);
+function getTrackHeading(projectedPath, progressIndex) {
+    const current = projectedPath[progressIndex] || projectedPath[0];
+    const next = projectedPath[(progressIndex + 1) % projectedPath.length] || current;
+    const previous = projectedPath[Math.max(progressIndex - 1, 0)] || current;
+    const dx = next.x - previous.x;
+    const dy = next.y - previous.y;
+    return Math.atan2(dy, dx);
 }
 
 function drawExhaustTrail(ctx, trail, compoundColor) {
-    const previousPoints = trail.slice(0, -1).slice(-12);
-    previousPoints.forEach((pt, index) => {
-        const fade = (index + 1) / previousPoints.length;
+    trail.forEach((pt, index) => {
+        const fade = (index + 1) / 20;
         ctx.save();
-        ctx.globalAlpha = 0.08 + (fade * 0.22);
+        ctx.globalAlpha = fade * 0.5;
         ctx.fillStyle = compoundColor;
-        ctx.shadowColor = compoundColor;
-        ctx.shadowBlur = 8;
         ctx.beginPath();
-        ctx.arc(pt.x, pt.y, 2 + (fade * 3.5), 0, Math.PI * 2);
+        ctx.arc(pt.cx, pt.cy, 3 * fade, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
     });
 }
 
+function drawCarMarkers(ctx, carPoint, heading, point) {
+    drawThrottleParticles(ctx, carPoint, heading, point);
+    drawBrakeMarker(ctx, carPoint, heading, point);
+}
+
 function drawThrottleParticles(ctx, carPoint, heading, point) {
     const throttle = Number(point.throttle) || 0;
-    if (throttle <= 0.7) {
+    if (throttle <= 0.75) {
         return;
     }
     ctx.save();
-    for (let i = 0; i < 5; i += 1) {
-        const spread = (Math.random() - 0.5) * 9;
-        const distance = 14 + (Math.random() * 18);
+    for (let i = 0; i < 3; i += 1) {
+        const spread = (i - 1) * 4;
+        const distance = 13 + (i * 4);
         const x = carPoint.x - Math.cos(heading) * distance + Math.cos(heading + Math.PI / 2) * spread;
         const y = carPoint.y - Math.sin(heading) * distance + Math.sin(heading + Math.PI / 2) * spread;
-        ctx.globalAlpha = 0.25 + Math.random() * 0.45;
-        ctx.fillStyle = Math.random() > 0.5 ? '#ff9800' : '#f44336';
+        ctx.globalAlpha = 0.55 - (i * 0.12);
+        ctx.fillStyle = '#ff9800';
         ctx.beginPath();
-        ctx.arc(x, y, 1.4 + Math.random() * 1.8, 0, Math.PI * 2);
+        ctx.arc(x, y, 2.2 - (i * 0.25), 0, Math.PI * 2);
         ctx.fill();
     }
     ctx.restore();
 }
 
-function drawCarF1(ctx, carPoint, angle, compoundColor, point) {
-    const isPit = Boolean(point.is_pit_lap || point.in_pit);
-    const glowColor = isPit ? '#ffd700' : compoundColor;
-
+function drawBrakeMarker(ctx, carPoint, heading, point) {
+    const brake = Number(point.brake) || 0;
+    if (brake <= 0.4) {
+        return;
+    }
     ctx.save();
-    ctx.translate(carPoint.x, carPoint.y);
-    ctx.rotate(angle);
-    ctx.shadowColor = glowColor;
-    ctx.shadowBlur = 12;
-
-    // Main slim F1 arrow body.
-    ctx.fillStyle = compoundColor;
+    ctx.fillStyle = '#ff2a00';
+    ctx.shadowColor = '#ff2a00';
+    ctx.shadowBlur = 10;
     ctx.beginPath();
-    ctx.moveTo(11, 0);
-    ctx.lineTo(3, -4);
-    ctx.lineTo(-8, -3);
-    ctx.lineTo(-10, 0);
-    ctx.lineTo(-8, 3);
-    ctx.lineTo(3, 4);
-    ctx.closePath();
+    ctx.arc(carPoint.x + Math.cos(heading) * 12, carPoint.y + Math.sin(heading) * 12, 3, 0, Math.PI * 2);
     ctx.fill();
-
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    // Wings and cockpit details.
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(7, -5);
-    ctx.lineTo(7, 5);
-    ctx.moveTo(-8, -6);
-    ctx.lineTo(-8, 6);
-    ctx.stroke();
-
-    ctx.fillStyle = '#08080e';
-    ctx.beginPath();
-    ctx.arc(1, 0, 2.2, 0, Math.PI * 2);
-    ctx.fill();
-
-    if ((Number(point.brake) || 0) > 0.3) {
-        ctx.fillStyle = '#ff3d00';
-        ctx.shadowColor = '#ff3d00';
-        ctx.shadowBlur = 8;
-        [-4, 4].forEach(offset => {
-            ctx.beginPath();
-            ctx.arc(4, offset, 2.2, 0, Math.PI * 2);
-            ctx.fill();
-        });
-    }
     ctx.restore();
-
-    if (isPit) {
-        drawPitLabel(ctx, carPoint);
-    }
 }
 
-function drawPitLabel(ctx, carPoint) {
+function drawF1ManagerCar(ctx, carPoint, heading, compoundColor, point) {
+    const isPit = Boolean(point.is_pit_lap || point.in_pit);
+
+    // Car marker: compound-colored dot with strong glow and white outer ring.
     ctx.save();
-    ctx.font = "700 11px 'Orbitron', monospace";
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#ffd700';
-    ctx.shadowColor = '#ffd700';
-    ctx.shadowBlur = 10;
-    ctx.fillText('PIT IN', carPoint.x, carPoint.y - 18);
+    ctx.shadowColor = compoundColor;
+    ctx.shadowBlur = 16;
+    ctx.fillStyle = compoundColor;
+    ctx.beginPath();
+    ctx.arc(carPoint.x, carPoint.y, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(carPoint.x, carPoint.y, 9, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    drawCarLabel(ctx, carPoint, compoundColor, point, isPit);
+}
+
+function drawCarLabel(ctx, carPoint, compoundColor, point, isPit) {
+    const compound = point.compound || '-';
+    const label = isPit ? 'PIT IN' : `LAP ${point.lap ?? '-'} | ${compound.charAt(0).toUpperCase()}`;
+    const font = "700 10px 'Orbitron', monospace";
+    const y = carPoint.y - 28;
+
+    ctx.save();
+    ctx.font = font;
+    const textWidth = ctx.measureText(label).width;
+    const boxWidth = textWidth + 14;
+    const boxHeight = 18;
+    const x = carPoint.x - (boxWidth / 2);
+
+    ctx.fillStyle = isPit ? 'rgba(255, 180, 0, 0.9)' : 'rgba(0, 0, 0, 0.85)';
+    drawRoundRect(ctx, x, y, boxWidth, boxHeight, 4);
+    ctx.fill();
+    if (!isPit) {
+        ctx.fillStyle = compoundColor;
+        drawRoundRect(ctx, x, y, 3, boxHeight, 2);
+        ctx.fill();
+    }
+    ctx.fillStyle = isPit ? '#050505' : '#ffffff';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, x + 8, y + (boxHeight / 2) + 0.5);
     ctx.restore();
 }
 
@@ -1372,45 +1392,84 @@ function drawOverlay(ctx, width, height, trackMap, point) {
     const lap = point?.lap ?? '-';
     const totalLaps = document.getElementById('total-laps')?.textContent || '-';
     const speed = Math.round(Number(point?.speed_kmh) || 0);
+    const compound = String(point?.compound || '-').toUpperCase();
+    const tireAge = Number.isFinite(Number(point?.tire_age)) ? `${point.tire_age}L` : '-';
 
+    // Left HUD panel.
     ctx.save();
-    ctx.font = "800 15px 'Orbitron', monospace";
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    drawRoundRect(ctx, 14, 14, 154, 72, 4);
+    ctx.fill();
+    ctx.font = "800 12px 'Orbitron', monospace";
     ctx.fillStyle = '#ffffff';
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-    ctx.shadowBlur = 8;
-    ctx.fillText(`${circuit}  LAP ${lap} / ${totalLaps}`, 16, 26);
+    ctx.fillText('F1', 26, 34);
+    ctx.fillStyle = '#f44336';
+    ctx.fillRect(54, 22, 2, 18);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('Q1', 68, 34);
+    ctx.font = "800 13px 'Orbitron', monospace";
+    ctx.fillText(`LAP ${lap} / ${totalLaps}`, 26, 58);
+    ctx.font = "600 10px 'Orbitron', monospace";
+    ctx.fillStyle = '#a0a0c0';
+    ctx.fillText(circuit, 26, 76);
 
-    const speedText = `${speed} km/h`;
-    ctx.font = "800 18px 'Orbitron', monospace";
-    const speedWidth = ctx.measureText(speedText).width + 24;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.58)';
-    ctx.fillRect(width - speedWidth - 14, 12, speedWidth, 34);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
-    ctx.strokeRect(width - speedWidth - 14, 12, speedWidth, 34);
+    // Right speed panel.
+    const panelWidth = 128;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    drawRoundRect(ctx, width - panelWidth - 14, 14, panelWidth, 58, 4);
+    ctx.fill();
+    ctx.font = "800 19px 'Orbitron', monospace";
     ctx.fillStyle = '#ffffff';
-    ctx.fillText(speedText, width - speedWidth - 2, 35);
+    ctx.fillText(`${speed} km/h`, width - panelWidth, 39);
+    ctx.font = "700 10px 'Orbitron', monospace";
+    ctx.fillStyle = '#a0a0c0';
+    ctx.fillText(`${compound} \u00b7 ${tireAge}`, width - panelWidth, 59);
     ctx.restore();
 }
 
 function drawMinimapLegend(ctx, width, height) {
     const items = [
-        { label: 'S', color: COMPOUND_COLORS.Soft },
-        { label: 'M', color: COMPOUND_COLORS.Medium },
-        { label: 'H', color: COMPOUND_COLORS.Hard }
+        { label: 'S', color: '#ff1744' },
+        { label: 'M', color: '#ffd600' },
+        { label: 'H', color: '#ffffff' }
     ];
 
     ctx.save();
-    ctx.font = "700 10px 'Orbitron', monospace";
+    ctx.font = "700 11px 'Orbitron', monospace";
     items.forEach((item, index) => {
-        const x = 16 + (index * 34);
-        const y = height - 18;
+        const x = 18 + (index * 40);
+        const y = height - 20;
         ctx.fillStyle = item.color;
         ctx.beginPath();
-        ctx.arc(x, y - 3, 4, 0, Math.PI * 2);
+        ctx.arc(x, y - 4, 4, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = '#ffffff';
-        ctx.fillText(item.label, x + 8, y);
+        ctx.fillText(item.label, x + 10, y);
     });
     ctx.restore();
+}
+
+function getF1ManagerCompoundColor(compound) {
+    const colors = {
+        Soft: '#ff1744',
+        Medium: '#ffd600',
+        Hard: '#ffffff'
+    };
+    return colors[compound] || getCompoundColor(compound || 'Hard');
+}
+
+function drawRoundRect(ctx, x, y, width, height, radius) {
+    const safeRadius = Math.min(radius, width / 2, height / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + safeRadius, y);
+    ctx.lineTo(x + width - safeRadius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+    ctx.lineTo(x + width, y + height - safeRadius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height);
+    ctx.lineTo(x + safeRadius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+    ctx.lineTo(x, y + safeRadius);
+    ctx.quadraticCurveTo(x, y, x + safeRadius, y);
+    ctx.closePath();
 }
 
