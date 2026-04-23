@@ -29,6 +29,15 @@ let circuitControlInitialized = false;
 let strategySelectInitialized = false;
 let compareControlInitialized = false;
 let mcControlInitialized = false;
+let telemetryControlInitialized = false;
+
+const telemetryState = {
+    points: [],
+    trackMap: null,
+    frameIndex: 0,
+    timer: null,
+    playing: false
+};
 
 document.addEventListener('DOMContentLoaded', async () => {
     initTabs();
@@ -136,6 +145,7 @@ function clearRenderedResults() {
     document.getElementById('sim-highlight').innerHTML = '';
     document.getElementById('compare-highlight').innerHTML = '';
     document.getElementById('mc-highlight').innerHTML = '';
+    resetTelemetryState();
 }
 
 async function loadCircuitInfo() {
@@ -325,7 +335,6 @@ function renderStintVisual(strategyName) {
         return;
     }
 
-    const totalLaps = strategy.stints.reduce((sum, stint) => sum + stint.length, 0);
     container.innerHTML = strategy.stints.map(stint => {
         const lower = stint.compound.toLowerCase();
         return `
@@ -347,10 +356,17 @@ async function runDeterministicSim() {
     button.textContent = 'Running...';
 
     try {
-        const data = await fetchJSON(`${API_BASE}/simulate/deterministic`, {
+        const raw = await fetchJSON(`${API_BASE}/simulate/telemetry`, {
             method: 'POST',
-            body: JSON.stringify({ strategy_name: strategyName, circuit: currentCircuit })
+            body: JSON.stringify({
+                strategy_name: strategyName,
+                circuit: currentCircuit,
+                timestep_s: 0.5,
+                max_points: 1500,
+                response_shape: 'v2'
+            })
         });
+        const data = normalizeTelemetryResponse(raw);
         displaySimResults(data);
     } catch (error) {
         alert(`Error: ${error.message}`);
@@ -441,6 +457,15 @@ function displaySimResults(data) {
             <td>${lap.is_pit_lap ? '<span class="pit-badge">PIT</span>' : ''}</td>
         </tr>
     `).join('');
+
+    renderTelemetryPlayback(data);
+}
+
+function normalizeTelemetryResponse(payload) {
+    if (payload && payload.result) {
+        return payload.result;
+    }
+    return payload;
 }
 
 function buildCompoundSegments(laps, field = 'final_lap_time') {
@@ -707,3 +732,243 @@ function displayMCResults(data) {
         `;
     }).join('');
 }
+
+function resetTelemetryState() {
+    if (telemetryState.timer) {
+        clearInterval(telemetryState.timer);
+    }
+    telemetryState.points = [];
+    telemetryState.trackMap = null;
+    telemetryState.frameIndex = 0;
+    telemetryState.timer = null;
+    telemetryState.playing = false;
+
+    const scrub = document.getElementById('telemetry-scrub');
+    const frameLabel = document.getElementById('telemetry-frame-label');
+    const playBtn = document.getElementById('btn-telemetry-play');
+    const sampling = document.getElementById('telemetry-sampling');
+    if (scrub) {
+        scrub.max = 0;
+        scrub.value = 0;
+    }
+    if (frameLabel) {
+        frameLabel.textContent = 'Frame 0 / 0';
+    }
+    if (playBtn) {
+        playBtn.textContent = 'Play';
+    }
+    if (sampling) {
+        sampling.textContent = 'Sampling: -';
+    }
+
+    setTelemetryBars({ throttle: 0, brake: 0, tire_health_pct: 0, tire_health_color: '#666666' });
+    setTelemetryKpis({});
+    drawMiniMap(null, null);
+}
+
+function initTelemetryControls() {
+    if (telemetryControlInitialized) {
+        return;
+    }
+
+    const playBtn = document.getElementById('btn-telemetry-play');
+    const scrub = document.getElementById('telemetry-scrub');
+
+    playBtn.addEventListener('click', () => {
+        if (telemetryState.playing) {
+            stopTelemetryPlayback();
+        } else {
+            startTelemetryPlayback();
+        }
+    });
+
+    scrub.addEventListener('input', event => {
+        const index = Number(event.target.value);
+        drawTelemetryFrame(index);
+    });
+
+    telemetryControlInitialized = true;
+}
+
+function renderTelemetryPlayback(data) {
+    initTelemetryControls();
+    stopTelemetryPlayback();
+
+    const points = data.telemetry || [];
+    telemetryState.points = points;
+    telemetryState.trackMap = data.track_map || null;
+    telemetryState.frameIndex = 0;
+
+    const scrub = document.getElementById('telemetry-scrub');
+    const sampling = data.sampling || {};
+    scrub.max = Math.max(points.length - 1, 0);
+    scrub.value = 0;
+    document.getElementById('telemetry-sampling').textContent =
+        `Sampling: dt=${Number(sampling.applied_timestep_s || 0).toFixed(2)}s, points=${sampling.returned_points ?? points.length}, downsample=${sampling.downsample_factor ?? 1}x`;
+
+    if (points.length === 0) {
+        drawMiniMap(telemetryState.trackMap, null);
+        return;
+    }
+
+    drawTelemetryFrame(0);
+}
+
+function startTelemetryPlayback() {
+    if (!telemetryState.points.length) {
+        return;
+    }
+    telemetryState.playing = true;
+    document.getElementById('btn-telemetry-play').textContent = 'Pause';
+    telemetryState.timer = setInterval(() => {
+        const nextIndex = telemetryState.frameIndex + 1;
+        if (nextIndex >= telemetryState.points.length) {
+            stopTelemetryPlayback();
+            return;
+        }
+        drawTelemetryFrame(nextIndex);
+    }, 45);
+}
+
+function stopTelemetryPlayback() {
+    telemetryState.playing = false;
+    if (telemetryState.timer) {
+        clearInterval(telemetryState.timer);
+        telemetryState.timer = null;
+    }
+    const playBtn = document.getElementById('btn-telemetry-play');
+    if (playBtn) {
+        playBtn.textContent = 'Play';
+    }
+}
+
+function drawTelemetryFrame(index) {
+    if (!telemetryState.points.length) {
+        return;
+    }
+    const safeIndex = Math.max(0, Math.min(index, telemetryState.points.length - 1));
+    telemetryState.frameIndex = safeIndex;
+    const point = telemetryState.points[safeIndex];
+
+    document.getElementById('telemetry-scrub').value = safeIndex;
+    document.getElementById('telemetry-frame-label').textContent = `Frame ${safeIndex + 1} / ${telemetryState.points.length}`;
+
+    setTelemetryBars(point);
+    setTelemetryKpis(point);
+    drawMiniMap(telemetryState.trackMap, point);
+}
+
+function setTelemetryBars(point) {
+    const throttlePct = Math.round((Number(point.throttle) || 0) * 100);
+    const brakePct = Math.round((Number(point.brake) || 0) * 100);
+    const healthPct = Math.round(Number(point.tire_health_pct) || 0);
+    const healthColor = point.tire_health_color || '#666666';
+
+    document.getElementById('telemetry-throttle-value').textContent = `${throttlePct}%`;
+    document.getElementById('telemetry-brake-value').textContent = `${brakePct}%`;
+    document.getElementById('telemetry-health-value').textContent = `${healthPct}%`;
+
+    document.getElementById('telemetry-throttle-fill').style.width = `${throttlePct}%`;
+    document.getElementById('telemetry-brake-fill').style.width = `${brakePct}%`;
+    document.getElementById('telemetry-health-fill').style.width = `${Math.max(0, Math.min(healthPct, 100))}%`;
+    document.getElementById('telemetry-health-fill').style.background = healthColor;
+}
+
+function setTelemetryKpis(point) {
+    const lap = point.lap ?? '-';
+    const speed = Number(point.speed_kmh || 0).toFixed(1);
+    const timeS = Number(point.t || 0).toFixed(1);
+    const compound = point.compound || '-';
+    const temp = Number(point.tire_temp_c || 0).toFixed(1);
+
+    document.getElementById('telemetry-lap-value').textContent = lap;
+    document.getElementById('telemetry-time-value').textContent = `${timeS}s`;
+    document.getElementById('telemetry-speed-value').textContent = `${speed} km/h`;
+    document.getElementById('telemetry-compound-value').textContent = compound;
+    document.getElementById('telemetry-temp-value').textContent = `Tyre Temp: ${temp} C`;
+}
+
+function drawMiniMap(trackMap, point) {
+    const canvas = document.getElementById('minimap-canvas');
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = '#0f1024';
+    ctx.fillRect(0, 0, width, height);
+
+    const path = trackMap?.path || [];
+    if (!path.length) {
+        ctx.fillStyle = '#a0a0c0';
+        ctx.font = '14px Inter';
+        ctx.fillText('Track map unavailable', 20, 32);
+        return;
+    }
+
+    const margin = 24;
+    const toCanvasX = x => margin + (x * (width - (2 * margin)));
+    const toCanvasY = y => margin + (y * (height - (2 * margin)));
+
+    const isTightTrack = (trackMap?.circuit === 'Monaco');
+    const outerStrokeWidth = isTightTrack ? 13 : 16;
+    const innerStrokeWidth = isTightTrack ? 2.2 : 2.5;
+
+    ctx.strokeStyle = '#3a3f64';
+    ctx.lineWidth = outerStrokeWidth;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    path.forEach((pt, idx) => {
+        const x = toCanvasX(Number(pt.x));
+        const y = toCanvasY(Number(pt.y));
+        if (idx === 0) {
+            ctx.moveTo(x, y);
+        } else {
+            ctx.lineTo(x, y);
+        }
+    });
+    ctx.closePath();
+    ctx.stroke();
+
+    ctx.strokeStyle = '#9ea7d4';
+    ctx.lineWidth = innerStrokeWidth;
+    ctx.beginPath();
+    path.forEach((pt, idx) => {
+        const x = toCanvasX(Number(pt.x));
+        const y = toCanvasY(Number(pt.y));
+        if (idx === 0) {
+            ctx.moveTo(x, y);
+        } else {
+            ctx.lineTo(x, y);
+        }
+    });
+    ctx.closePath();
+    ctx.stroke();
+
+    if (trackMap?.circuit) {
+        const source = trackMap?.source || 'unknown';
+        ctx.fillStyle = '#a0a0c0';
+        ctx.font = '12px Inter';
+        ctx.fillText(`${trackMap.circuit} | ${source}`, 18, height - 14);
+    }
+
+    if (!point) {
+        return;
+    }
+
+    const lapProgress = Math.max(0, Math.min(Number(point.lap_progress || 0), 0.99999));
+    const idx = Math.floor(lapProgress * path.length);
+    const carPt = path[idx] || path[0];
+    const carX = toCanvasX(Number(carPt.x));
+    const carY = toCanvasY(Number(carPt.y));
+
+    ctx.fillStyle = point.tire_health_color || '#00d2ff';
+    ctx.beginPath();
+    ctx.arc(carX, carY, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+}
+

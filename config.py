@@ -49,6 +49,14 @@ CIRCUITS: Dict[str, Dict[str, float]] = {
         "overtake_difficulty": 0.50,
         "rain_probability": 0.15,
     },
+    "Suzuka": {
+        "pit_lane_delta": 21.0,
+        "base_lap_time": 92.0,
+        "degradation_multiplier": 1.05,
+        "total_laps": 53,
+        "overtake_difficulty": 0.58,
+        "rain_probability": 0.12,
+    },
 }
 
 # Legacy constants kept for backward compatibility with the original flat-module

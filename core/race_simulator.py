@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
 from config import (
-    BASE_LAP_TIME,
     FUEL_EFFECT_PER_LAP,
     LAP_TIME_VARIABILITY_STD,
     MAX_PIT_STOP_TIME,
@@ -24,6 +23,7 @@ from config import (
     get_circuit_config,
 )
 from core.strategy import Strategy
+from core.track_maps import get_track_map
 from core.tire_model import Tire
 
 
@@ -67,6 +67,163 @@ class RaceSimulator:
 
     def _setting(self, key: str, default):
         return self.simulation_overrides.get(key, default)
+
+    @staticmethod
+    def _health_to_color(health_pct: float) -> str:
+        ratio = float(np.clip(health_pct, 0.0, 100.0)) / 100.0
+        red = int(round(255 * (1.0 - ratio)))
+        green = int(round(255 * ratio))
+        return f"#{red:02X}{green:02X}33"
+
+    def _build_track_map(self) -> Dict[str, object]:
+        resolved_track_map = get_track_map(self.circuit_name)
+        if resolved_track_map and resolved_track_map.get("path"):
+            return resolved_track_map
+
+        # Fallback oval map keeps telemetry usable for circuits without custom geometry.
+        length_by_circuit = {
+            "Silverstone": 5891,
+            "Monaco": 3337,
+            "Monza": 5793,
+            "Bahrain": 5412,
+            "Spa": 7004,
+            "Suzuka": 5807,
+        }
+        radius_x_by_circuit = {
+            "Silverstone": 0.46,
+            "Monaco": 0.43,
+            "Monza": 0.49,
+            "Bahrain": 0.47,
+            "Spa": 0.50,
+        }
+        radius_x = radius_x_by_circuit.get(self.circuit_name, 0.46)
+        radius_y = 0.36
+        points = []
+        for angle in np.linspace(0.0, 2.0 * np.pi, 72, endpoint=False):
+            x = 0.5 + radius_x * np.cos(angle)
+            y = 0.5 + radius_y * np.sin(angle)
+            points.append({"x": round(float(x), 5), "y": round(float(y), 5)})
+
+        return {
+            "circuit": self.circuit_name,
+            "length_m": int(length_by_circuit.get(self.circuit_name, 5500)),
+            "pit_entry_progress": 0.72,
+            "pit_exit_progress": 0.93,
+            "source": "fallback_oval",
+            "path": points,
+        }
+
+    def generate_telemetry(
+        self,
+        timestep_s: float = 0.5,
+        max_points: Optional[int] = None,
+    ) -> Dict[str, object]:
+        if self.race_data is None:
+            raise RuntimeError("Simulation has not been run yet.")
+
+        dt = float(np.clip(timestep_s, 0.1, 2.0))
+        track_map = self._build_track_map()
+        track_length = float(track_map["length_m"])
+        pit_entry_progress = float(track_map.get("pit_entry_progress", 0.72))
+        pit_exit_progress = float(track_map.get("pit_exit_progress", 0.93))
+        if pit_exit_progress < pit_entry_progress:
+            pit_window_contains = lambda progress: progress >= pit_entry_progress or progress <= pit_exit_progress
+        else:
+            pit_window_contains = lambda progress: pit_entry_progress <= progress <= pit_exit_progress
+        raw_telemetry: List[Dict[str, object]] = []
+
+        current_time = 0.0
+        for lap_row in self.race_data.itertuples(index=False):
+            lap = int(lap_row.lap)
+            lap_time = float(lap_row.final_lap_time)
+            tire_age = int(lap_row.tire_age)
+            compound = str(lap_row.compound)
+            estimated_temp = float(lap_row.estimated_temp)
+            grip = float(lap_row.grip)
+            is_pit_lap = bool(lap_row.is_pit_lap)
+            cliff_point = max(int(TIRE_COMPOUNDS[compound]["cliff_point"]), 1)
+            optimal_temp = float(TIRE_COMPOUNDS[compound]["optimal_temp"])
+
+            steps = max(int(np.ceil(lap_time / dt)), 2)
+            for step in range(steps):
+                progress_in_lap = step / max(steps - 1, 1)
+
+                # Phase-based profile keeps signals smooth while remaining deterministic.
+                phase = 2.0 * np.pi * progress_in_lap
+                raw_throttle = 0.76 + 0.24 * np.sin((phase * 2.8) + 0.35)
+                brake = np.clip(0.85 * np.maximum(0.0, np.sin((phase * 2.8) - 1.15)), 0.0, 1.0)
+                throttle = np.clip(raw_throttle * (1.0 - (0.65 * brake)), 0.0, 1.0)
+
+                dynamic_temp = estimated_temp + 18.0 * (throttle - 0.55) + 12.0 * brake
+                tire_temp = float(np.clip(dynamic_temp, 60.0, 150.0))
+
+                wear_pct = float(np.clip((tire_age / (cliff_point + 8)) * 100.0, 0.0, 100.0))
+                overheat_penalty = max(0.0, tire_temp - optimal_temp) * 0.45
+                grip_penalty = max(0.0, (1.0 - grip) * 100.0)
+                health_pct = float(np.clip(100.0 - wear_pct - overheat_penalty - grip_penalty, 0.0, 100.0))
+
+                speed_kmh = float(np.clip(140.0 + 220.0 * throttle - 125.0 * brake, 60.0, 340.0))
+                race_progress = ((lap - 1) + progress_in_lap) / max(self.total_laps, 1)
+                s_on_track_m = float(race_progress * track_length)
+
+                in_pit_window = bool(is_pit_lap and pit_window_contains(progress_in_lap))
+                raw_telemetry.append(
+                    {
+                        "t": round(current_time + (progress_in_lap * lap_time), 3),
+                        "lap": lap,
+                        "lap_progress": round(progress_in_lap, 5),
+                        "race_progress": round(race_progress, 5),
+                        "s_on_track_m": round(s_on_track_m, 3),
+                        "compound": compound,
+                        "tire_age": tire_age,
+                        "throttle": round(float(throttle), 4),
+                        "brake": round(float(brake), 4),
+                        "speed_kmh": round(speed_kmh, 3),
+                        "tire_temp_c": round(tire_temp, 3),
+                        "tire_wear_pct": round(wear_pct, 3),
+                        "tire_health_pct": round(health_pct, 3),
+                        "tire_health_color": self._health_to_color(health_pct),
+                        "in_pit": in_pit_window,
+                    }
+                )
+
+            current_time += lap_time
+
+        returned_telemetry = raw_telemetry
+        raw_points = len(raw_telemetry)
+        downsample_factor = 1
+        if max_points is not None:
+            target_points = max(int(max_points), 1)
+            if raw_points > target_points:
+                downsample_factor = int(np.ceil(raw_points / target_points))
+                returned_telemetry = raw_telemetry[::downsample_factor]
+
+        return {
+            "track_map": track_map,
+            "channels": {
+                "t": {"unit": "s", "label": "Race Time"},
+                "lap": {"unit": "lap", "label": "Lap Number"},
+                "lap_progress": {"unit": "ratio", "label": "Lap Progress"},
+                "race_progress": {"unit": "ratio", "label": "Race Progress"},
+                "s_on_track_m": {"unit": "m", "label": "Distance Along Track"},
+                "speed_kmh": {"unit": "km/h", "label": "Speed"},
+                "throttle": {"unit": "ratio", "label": "Throttle"},
+                "brake": {"unit": "ratio", "label": "Brake"},
+                "tire_temp_c": {"unit": "C", "label": "Tyre Temperature"},
+                "tire_wear_pct": {"unit": "%", "label": "Tyre Wear"},
+                "tire_health_pct": {"unit": "%", "label": "Tyre Health"},
+                "tire_health_color": {"unit": "hex", "label": "Tyre Health Color"},
+                "in_pit": {"unit": "bool", "label": "Pit Lane Flag"},
+            },
+            "telemetry": returned_telemetry,
+            "sampling": {
+                "requested_timestep_s": timestep_s,
+                "applied_timestep_s": dt,
+                "raw_points": raw_points,
+                "returned_points": len(returned_telemetry),
+                "downsample_factor": downsample_factor,
+            },
+        }
 
     def _resolve_compound_data(self, compound: str) -> Dict[str, float]:
         compound_overrides = self.simulation_overrides.get("compound_overrides", {})

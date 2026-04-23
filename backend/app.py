@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import traceback
+from datetime import datetime, timezone
 
 import numpy as np
 from flask import Flask, jsonify, request, send_from_directory
@@ -70,26 +71,40 @@ def get_strategies():
 @app.route("/api/degradation", methods=["GET"])
 def get_degradation():
     circuit_name = request.args.get("circuit", "Silverstone")
+    circuit = get_circuit_config(circuit_name)
     max_laps = int(request.args.get("max_laps", 50))
     compounds_data = {}
+    base_lap_time = float(circuit["base_lap_time"])
+    degradation_multiplier = float(circuit["degradation_multiplier"])
 
     for compound_name, params in TIRE_COMPOUNDS.items():
-        tire = Tire(compound_name)
+        adjusted_params = dict(params)
+        adjusted_params["degradation_rate"] = float(adjusted_params["degradation_rate"]) * degradation_multiplier
+
+        tire = Tire(compound_name, compound_data=adjusted_params)
         curve = tire.get_degradation_curve(max_laps=max_laps)
+        lap_times = [round(tire.get_lap_time(base_time=base_lap_time, age=lap), 3) for lap in curve["laps"].tolist()]
         compounds_data[compound_name] = {
             "laps": curve["laps"].tolist(),
             "grip": [round(value, 4) for value in curve["grip"].tolist()],
-            "lap_times": [round(value, 3) for value in curve["lap_times"].tolist()],
+            "lap_times": lap_times,
             "temperature": [round(value, 2) for value in curve["temperature"].tolist()],
             "color": params["color"],
             "label": params["label"],
             "cliff_point": params["cliff_point"],
             "warmup_laps": params["warmup_laps"],
             "initial_grip": params["initial_grip"],
-            "degradation_rate": params["degradation_rate"],
+            "degradation_rate": round(adjusted_params["degradation_rate"], 6),
         }
 
-    return jsonify({"circuit": circuit_name, "compounds": compounds_data})
+    return jsonify(
+        {
+            "circuit": circuit_name,
+            "base_lap_time": base_lap_time,
+            "degradation_multiplier": degradation_multiplier,
+            "compounds": compounds_data,
+        }
+    )
 
 
 @app.route("/api/simulate/deterministic", methods=["POST"])
@@ -119,6 +134,75 @@ def simulate_deterministic():
                 "strategy": strategy.as_dict(),
                 "summary": summary,
                 "laps": df.to_dict(orient="records"),
+            }
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc), "traceback": traceback.format_exc()}), 500
+
+
+@app.route("/api/simulate/telemetry", methods=["POST"])
+def simulate_telemetry():
+    data = request.get_json(silent=True) or {}
+    strategy_name = data.get("strategy_name")
+    circuit_name = data.get("circuit", "Silverstone")
+    timestep_s = float(data.get("timestep_s", 0.5))
+    max_points = data.get("max_points")
+    response_shape = str(data.get("response_shape", "v2")).lower()
+    if not strategy_name:
+        return jsonify({"error": "Missing 'strategy_name' in request body"}), 400
+
+    strategy = get_strategy_by_name(strategy_name, circuit_name)
+    if strategy is None:
+        return jsonify({"error": f"Strategy '{strategy_name}' not found for circuit '{circuit_name}'"}), 404
+
+    try:
+        simulator = RaceSimulator(
+            strategy=strategy,
+            circuit_name=circuit_name,
+            enable_variability=False,
+            enable_safety_car=False,
+        )
+        df = simulator.simulate()
+        summary = simulator.get_summary()
+        telemetry_payload = simulator.generate_telemetry(timestep_s=timestep_s, max_points=max_points)
+
+        result = {
+            "circuit": circuit_name,
+            "strategy": strategy.as_dict(),
+            "summary": summary,
+            "laps": df.to_dict(orient="records"),
+            "track_map": telemetry_payload["track_map"],
+            "channels": telemetry_payload["channels"],
+            "sampling": telemetry_payload["sampling"],
+            "telemetry": telemetry_payload["telemetry"],
+        }
+
+        if response_shape == "legacy":
+            return jsonify(result)
+
+        request_echo = {
+            "strategy_name": strategy_name,
+            "circuit": circuit_name,
+            "timestep_s": timestep_s,
+            "max_points": max_points,
+            "response_shape": "v2",
+            "resolved": {
+                "applied_timestep_s": telemetry_payload["sampling"]["applied_timestep_s"],
+                "returned_points": telemetry_payload["sampling"]["returned_points"],
+                "downsample_factor": telemetry_payload["sampling"]["downsample_factor"],
+            },
+        }
+
+        return jsonify(
+            {
+                "meta": {
+                    "schema_name": "f1_telemetry_simulation",
+                    "schema_version": "2.0.0",
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                    "status": "ok",
+                },
+                "request": request_echo,
+                "result": result,
             }
         )
     except Exception as exc:
