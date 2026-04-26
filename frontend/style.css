@@ -695,7 +695,7 @@ body::before {
 
 .telemetry-dashboard {
     display: grid;
-    grid-template-columns: minmax(300px, 1.25fr) minmax(220px, 0.75fr) repeat(4, minmax(145px, 1fr));
+    grid-template-columns: minmax(220px, 0.75fr) repeat(4, minmax(145px, 1fr));
     gap: 1rem;
     align-items: stretch;
 }
@@ -858,6 +858,263 @@ body::before {
     align-items: center;
     text-align: center;
     gap: 0.7rem;
+}
+
+/* ======================== 4-TIRE GRID ======================== */
+.four-tires { justify-content: center; }
+
+.tire-grid-4 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    width: 100%;
+    max-width: 170px;
+}
+
+.tire-cell { display: flex; justify-content: center; }
+
+.tire-ring-sm {
+    --ring-value: 0%;
+    --ring-color: #666666;
+    width: 68px;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    padding: 5px;
+    background:
+        radial-gradient(circle at center, #101018 54%, transparent 55%),
+        conic-gradient(var(--ring-color) var(--ring-value), #20202c 0);
+    transition: background 160ms linear;
+}
+
+.tire-ring-sm-inner {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: #08080e;
+}
+
+.tire-ring-sm-inner strong {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.72rem;
+    line-height: 1;
+}
+
+.tire-ring-sm-inner span {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.52rem;
+    color: var(--text-muted);
+    letter-spacing: 1px;
+    margin-top: 2px;
+}
+
+/* ======================== STANDALONE MINIMAP ======================== */
+.minimap-section-standalone {
+    margin-top: 1.5rem;
+    background: linear-gradient(145deg, #090910, #11111f);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 0.75rem;
+}
+
+.minimap-section-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.65rem;
+}
+
+.minimap-section-header > div { min-width: 0; }
+
+.minimap-section-header strong {
+    display: block;
+    margin-top: 0.1rem;
+    color: var(--text-primary);
+    font-family: 'Orbitron', monospace;
+    font-size: 0.95rem;
+    overflow-wrap: anywhere;
+}
+
+/* ======================== WEATHER SELECTOR ======================== */
+.weather-selector {
+    display: flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+.weather-btn {
+    padding: 0.45rem 0.85rem;
+    border-radius: 50px;
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    font-family: 'Inter', sans-serif;
+    cursor: pointer;
+    transition: var(--transition);
+    white-space: nowrap;
+}
+
+.weather-btn:hover {
+    border-color: var(--accent-blue);
+    color: var(--text-primary);
+}
+
+.weather-btn.active {
+    background: rgba(0, 210, 255, 0.15);
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+    font-weight: 600;
+    box-shadow: 0 0 12px rgba(0, 210, 255, 0.15);
+}
+
+/* ======================== CUSTOM STRATEGY PANEL ======================== */
+.custom-strategy-panel {
+    background: var(--bg-card);
+    border: 1px solid rgba(139, 92, 246, 0.25);
+    border-radius: var(--radius);
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.custom-strategy-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.custom-strategy-header h4 {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.85rem;
+    color: var(--accent-purple);
+    margin: 0;
+}
+
+.custom-total-laps {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-family: 'Orbitron', monospace;
+}
+
+.custom-stint-row {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.custom-stint-row .stint-number {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    min-width: 20px;
+    text-align: center;
+}
+
+.custom-stint-row .select-input {
+    flex: 1;
+    min-width: 100px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+}
+
+.custom-stint-laps {
+    width: 80px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.6rem;
+    color: var(--text-primary);
+    font-family: 'Inter', sans-serif;
+    font-size: 0.85rem;
+    text-align: center;
+}
+
+.custom-stint-laps:focus {
+    outline: none;
+    border-color: var(--accent-purple);
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
+}
+
+.btn-remove-stint {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid rgba(244, 67, 54, 0.3);
+    background: rgba(244, 67, 54, 0.1);
+    color: #f44336;
+    cursor: pointer;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+}
+
+.btn-remove-stint:hover {
+    background: rgba(244, 67, 54, 0.25);
+    border-color: #f44336;
+}
+
+.btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 1.25rem;
+    background: rgba(139, 92, 246, 0.12);
+    color: var(--accent-purple);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: var(--radius-sm);
+    font-family: 'Inter', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+    margin-top: 0.5rem;
+}
+
+.btn-secondary:hover {
+    background: rgba(139, 92, 246, 0.22);
+    border-color: var(--accent-purple);
+}
+
+/* ======================== WARNING TOAST ======================== */
+.warning-toast {
+    position: fixed;
+    top: 1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    background: linear-gradient(135deg, rgba(255, 152, 0, 0.95), rgba(230, 81, 0, 0.95));
+    color: #fff;
+    padding: 0.75rem 1.5rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    box-shadow: 0 8px 32px rgba(255, 152, 0, 0.35);
+    animation: slideDown 0.35s ease;
+}
+
+@keyframes slideDown {
+    from { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.warning-toast-close {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 1.3rem;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
 }
 
 .tire-ring {
@@ -1193,10 +1450,10 @@ body::before {
     .checkbox-grid { grid-template-columns: 1fr; }
     .highlight-stats { flex-wrap: wrap; gap: 1rem; }
     .telemetry-dashboard { grid-template-columns: 1fr 1fr; }
-    .telemetry-map-wrap,
     .telemetry-speed-card { grid-column: 1 / -1; }
     .telemetry-toolbar { flex-wrap: wrap; }
     .telemetry-frame { text-align: left; }
+    .weather-selector { flex-wrap: wrap; }
 }
 
 @media (max-width: 600px) {
@@ -1206,6 +1463,8 @@ body::before {
     #app-title { font-size: 1.1rem; letter-spacing: 1px; }
     .telemetry-dashboard { grid-template-columns: 1fr; }
     .telemetry-speed-card strong { font-size: 2.5rem; }
+    .custom-stint-row { flex-wrap: wrap; }
+    .tire-grid-4 { max-width: 140px; }
 }
 
 /* ======================== SCROLLBAR ======================== */

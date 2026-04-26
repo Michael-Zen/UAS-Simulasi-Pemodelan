@@ -19,6 +19,12 @@
 </head>
 <body>
 
+    <!-- ========== WARNING TOAST ========== -->
+    <div class="warning-toast hidden" id="warning-toast">
+        <span id="warning-toast-msg"></span>
+        <button class="warning-toast-close" id="warning-toast-close">&times;</button>
+    </div>
+
     <!-- ========== HEADER ========== -->
     <header id="app-header">
         <div class="header-glow"></div>
@@ -132,9 +138,47 @@
                     <label for="strategy-select">Pilih Strategi:</label>
                     <select id="strategy-select" class="select-input"></select>
                 </div>
+                <div class="control-group">
+                    <label>Kondisi Race:</label>
+                    <div class="weather-selector" id="weather-selector">
+                        <button class="weather-btn active" data-weather="sunny" type="button">☀️ Cerah</button>
+                        <button class="weather-btn" data-weather="cloudy" type="button">⛅ Mendung</button>
+                        <button class="weather-btn" data-weather="rain" type="button">🌧️ Hujan</button>
+                        <button class="weather-btn" data-weather="heavy_rain" type="button">⛈️ Lebat</button>
+                    </div>
+                </div>
                 <button class="btn-primary" id="btn-simulate">
                     <span class="btn-icon">&#9654;</span> Run Simulation
                 </button>
+            </div>
+
+            <!-- Custom Strategy Builder -->
+            <div id="custom-strategy-builder" class="custom-strategy-panel hidden">
+                <div class="custom-strategy-header">
+                    <h4>🛠️ Custom Strategy Builder</h4>
+                    <span class="custom-total-laps" id="custom-total-laps-label">Total: - laps</span>
+                </div>
+                <div id="custom-stints-container">
+                    <div class="custom-stint-row">
+                        <label class="stint-number">1</label>
+                        <select class="custom-compound-select select-input">
+                            <option value="Soft">Soft</option><option value="Medium">Medium</option><option value="Hard">Hard</option>
+                            <option value="Intermediate">Intermediate</option><option value="Wet">Wet</option>
+                        </select>
+                        <input type="number" class="custom-stint-laps" placeholder="Laps" min="1" max="78" value="20">
+                        <button class="btn-remove-stint" type="button">&times;</button>
+                    </div>
+                    <div class="custom-stint-row">
+                        <label class="stint-number">2</label>
+                        <select class="custom-compound-select select-input">
+                            <option value="Soft">Soft</option><option value="Medium" selected>Medium</option><option value="Hard">Hard</option>
+                            <option value="Intermediate">Intermediate</option><option value="Wet">Wet</option>
+                        </select>
+                        <input type="number" class="custom-stint-laps" placeholder="Laps" min="1" max="78" value="32">
+                        <button class="btn-remove-stint" type="button">&times;</button>
+                    </div>
+                </div>
+                <button id="btn-add-stint" class="btn-secondary" type="button">+ Add Stint</button>
             </div>
 
             <!-- Strategy stint visual -->
@@ -167,22 +211,9 @@
                         <input type="range" id="telemetry-scrub" class="slider-input telemetry-scrub" min="0" max="0" value="0" step="1" aria-label="Telemetry frame scrubber">
                         <div class="telemetry-frame" id="telemetry-frame-label">Frame 0 / 0</div>
                     </div>
-                    <div class="telemetry-dashboard">
-                        <div class="telemetry-map-wrap">
-                            <div class="telemetry-map-head">
-                                <div>
-                                    <span class="telemetry-label">Circuit</span>
-                                    <strong id="telemetry-circuit-label">-</strong>
-                                </div>
-                                <div>
-                                    <span class="telemetry-label">Lap</span>
-                                    <strong id="telemetry-lap-value">-</strong>
-                                </div>
-                            </div>
-                            <canvas id="minimap-canvas" width="700" height="400"></canvas>
-                            <div class="telemetry-sampling" id="telemetry-sampling">Sampling: -</div>
-                        </div>
 
+                    <!-- Telemetry widgets (without minimap) -->
+                    <div class="telemetry-dashboard">
                         <div class="telemetry-speed-card">
                             <span class="telemetry-label">Speed</span>
                             <strong id="telemetry-speed-value">0</strong>
@@ -211,12 +242,41 @@
                             <span class="pedal-name">REM</span>
                         </div>
 
-                        <div class="telemetry-widget telemetry-tire-widget">
+                        <!-- 4 Separate Tire Indicators -->
+                        <div class="telemetry-widget telemetry-tire-widget four-tires">
                             <span class="telemetry-label">Tire Cond.</span>
-                            <div class="tire-ring" id="telemetry-tire-ring" style="--ring-color:#666666; --compound-color:#666666; --ring-value:0%">
-                                <div class="tire-ring-inner">
-                                    <strong id="telemetry-health-value">0%</strong>
-                                    <span id="telemetry-health-status">CLIFF</span>
+                            <div class="tire-grid-4">
+                                <div class="tire-cell" id="tire-FL">
+                                    <div class="tire-ring-sm" style="--ring-color:#00e676;--ring-value:100%">
+                                        <div class="tire-ring-sm-inner">
+                                            <strong>100%</strong>
+                                            <span>FL</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="tire-cell" id="tire-FR">
+                                    <div class="tire-ring-sm" style="--ring-color:#00e676;--ring-value:100%">
+                                        <div class="tire-ring-sm-inner">
+                                            <strong>100%</strong>
+                                            <span>FR</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="tire-cell" id="tire-RL">
+                                    <div class="tire-ring-sm" style="--ring-color:#00e676;--ring-value:100%">
+                                        <div class="tire-ring-sm-inner">
+                                            <strong>100%</strong>
+                                            <span>RL</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="tire-cell" id="tire-RR">
+                                    <div class="tire-ring-sm" style="--ring-color:#00e676;--ring-value:100%">
+                                        <div class="tire-ring-sm-inner">
+                                            <strong>100%</strong>
+                                            <span>RR</span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             <div class="tire-meta">
@@ -235,6 +295,22 @@
                                 <span id="telemetry-temp-status">COLD</span>
                             </div>
                         </div>
+                    </div>
+
+                    <!-- Standalone Minimap Section -->
+                    <div class="minimap-section-standalone">
+                        <div class="minimap-section-header">
+                            <div>
+                                <span class="telemetry-label">Circuit</span>
+                                <strong id="telemetry-circuit-label">-</strong>
+                            </div>
+                            <div>
+                                <span class="telemetry-label">Lap</span>
+                                <strong id="telemetry-lap-value">-</strong>
+                            </div>
+                        </div>
+                        <canvas id="minimap-canvas" width="1200" height="500"></canvas>
+                        <div class="telemetry-sampling" id="telemetry-sampling">Sampling: -</div>
                     </div>
                 </div>
 
@@ -269,6 +345,17 @@
 
             <div class="compare-controls">
                 <div class="checkbox-grid" id="compare-checkboxes"></div>
+
+                <div class="control-group">
+                    <label>Kondisi Race:</label>
+                    <div class="weather-selector" id="compare-weather-selector">
+                        <button class="weather-btn active" data-weather="sunny" type="button">☀️ Cerah</button>
+                        <button class="weather-btn" data-weather="cloudy" type="button">⛅ Mendung</button>
+                        <button class="weather-btn" data-weather="rain" type="button">🌧️ Hujan</button>
+                        <button class="weather-btn" data-weather="heavy_rain" type="button">⛈️ Lebat</button>
+                    </div>
+                </div>
+
                 <button class="btn-primary" id="btn-compare">
                     <span class="btn-icon">&#9776;</span> Compare Strategies
                 </button>
@@ -311,6 +398,17 @@
 
             <div class="mc-controls">
                 <div class="checkbox-grid" id="mc-checkboxes"></div>
+
+                <div class="control-group">
+                    <label>Kondisi Race:</label>
+                    <div class="weather-selector" id="mc-weather-selector">
+                        <button class="weather-btn active" data-weather="sunny" type="button">☀️ Cerah</button>
+                        <button class="weather-btn" data-weather="cloudy" type="button">⛅ Mendung</button>
+                        <button class="weather-btn" data-weather="rain" type="button">🌧️ Hujan</button>
+                        <button class="weather-btn" data-weather="heavy_rain" type="button">⛈️ Lebat</button>
+                    </div>
+                </div>
+
                 <div class="slider-group">
                     <label for="mc-iterations">Jumlah Iterasi: <span id="mc-iter-value">500</span></label>
                     <input type="range" id="mc-iterations" min="100" max="1000" step="50" value="500" class="slider-input">

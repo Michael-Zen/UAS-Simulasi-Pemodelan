@@ -107,6 +107,28 @@ class Strategy:
             "pit_stop_laps": self.get_pit_stop_laps(),
         }
 
+    @classmethod
+    def from_custom_stints(
+        cls,
+        custom_stints: Sequence[Dict[str, object]],
+        total_laps: int,
+        name: str = "Custom",
+    ) -> "Strategy":
+        """Build a Strategy from a list of ``{"compound": ..., "laps": ...}`` dicts."""
+        stints: List[Stint] = []
+        lap_cursor = 1
+        for entry in custom_stints:
+            compound = str(entry["compound"])
+            length = int(entry["laps"])
+            end_lap = min(lap_cursor + length - 1, total_laps)
+            stints.append((compound, lap_cursor, end_lap))
+            lap_cursor = end_lap + 1
+        # Extend or trim the last stint to match total_laps exactly.
+        if stints:
+            last_compound, last_start, _ = stints[-1]
+            stints[-1] = (last_compound, last_start, total_laps)
+        return cls(name=name, stints=stints, total_laps=total_laps)
+
     def __repr__(self) -> str:
         compounds = " -> ".join(stint[0][0] for stint in self.stints)
         return f"Strategy('{self.name}', stops={self.num_stops}, [{compounds}])"

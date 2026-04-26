@@ -30,6 +30,13 @@ let strategySelectInitialized = false;
 let compareControlInitialized = false;
 let mcControlInitialized = false;
 let telemetryControlInitialized = false;
+let currentWeather = 'sunny';
+let customStintInitialized = false;
+
+const DRY_TIRES = ['Soft', 'Medium', 'Hard'];
+const TIRE_WEAR_FACTORS = { FL: 0.98, FR: 0.97, RL: 0.96, RR: 0.95 };
+const CLIFF_AGES = { Soft: 18, Medium: 28, Hard: 40, Intermediate: 24, Wet: 20 };
+
 
 const telemetryState = {
     points: [],
@@ -45,6 +52,8 @@ window.carTrail = window.carTrail || [];
 
 document.addEventListener('DOMContentLoaded', async () => {
     initTabs();
+    initAllWeatherSelectors();
+    initWarningToast();
     await initializeApp();
 });
 
@@ -316,15 +325,26 @@ function populateStrategySelect() {
     const select = document.getElementById('strategy-select');
     select.innerHTML = allStrategies.map(strategy => (
         `<option value="${strategy.name}">${strategy.name} (${strategy.num_stops}-stop)</option>`
-    )).join('');
+    )).join('') + '<option value="__custom__">\u270f\ufe0f Custom Strategy</option>';
 
     if (!strategySelectInitialized) {
-        select.addEventListener('change', () => renderStintVisual(select.value));
+        select.addEventListener('change', () => {
+            const val = select.value;
+            const builder = document.getElementById('custom-strategy-builder');
+            if (val === '__custom__') {
+                builder.classList.remove('hidden');
+                updateCustomLapsLabel();
+            } else {
+                builder.classList.add('hidden');
+                renderStintVisual(val);
+            }
+        });
         document.getElementById('btn-simulate').addEventListener('click', runDeterministicSim);
         strategySelectInitialized = true;
     }
+    initCustomStrategyBuilder();
 
-    if (allStrategies.length > 0) {
+    if (allStrategies.length > 0 && select.value !== '__custom__') {
         renderStintVisual(select.value);
     } else {
         document.getElementById('stint-visual').innerHTML = '';
@@ -356,19 +376,36 @@ function renderStintVisual(strategyName) {
 async function runDeterministicSim() {
     const strategyName = document.getElementById('strategy-select').value;
     const button = document.getElementById('btn-simulate');
+    const isCustom = strategyName === '__custom__';
+
+    if (['rain', 'heavy_rain'].includes(currentWeather)) {
+        const stints = isCustom ? gatherCustomStints() : getStrategyStints(strategyName);
+        const hasDry = stints.some(s => DRY_TIRES.includes(s.compound));
+        if (hasDry) {
+            showWarning('\u26a0\ufe0f Ban kering (Soft/Medium/Hard) tidak aman di kondisi hujan! Ganti ke Intermediate/Wet.');
+            return;
+        }
+    }
+
     button.disabled = true;
     button.textContent = 'Running...';
 
     try {
+        const payload = {
+            circuit: currentCircuit,
+            weather: currentWeather,
+            timestep_s: 0.5,
+            max_points: 1500,
+            response_shape: 'v2'
+        };
+        if (isCustom) {
+            payload.custom_stints = gatherCustomStints();
+        } else {
+            payload.strategy_name = strategyName;
+        }
         const raw = await fetchJSON(`${API_BASE}/simulate/telemetry`, {
             method: 'POST',
-            body: JSON.stringify({
-                strategy_name: strategyName,
-                circuit: currentCircuit,
-                timestep_s: 0.5,
-                max_points: 1500,
-                response_shape: 'v2'
-            })
+            body: JSON.stringify(payload)
         });
         const data = normalizeTelemetryResponse(raw);
         displaySimResults(data);
@@ -526,9 +563,10 @@ async function runComparison() {
     button.textContent = 'Comparing...';
 
     try {
+        const compareWeather = getWeatherFromSelector('compare-weather-selector');
         const data = await fetchJSON(`${API_BASE}/compare`, {
             method: 'POST',
-            body: JSON.stringify({ strategy_names: checked, circuit: currentCircuit })
+            body: JSON.stringify({ strategy_names: checked, circuit: currentCircuit, weather: compareWeather })
         });
         displayCompareResults(data);
     } catch (error) {
@@ -622,9 +660,10 @@ async function runMonteCarlo() {
     document.getElementById('mc-results').classList.add('hidden');
 
     try {
+        const mcWeather = getWeatherFromSelector('mc-weather-selector');
         const data = await fetchJSON(`${API_BASE}/simulate/monte-carlo`, {
             method: 'POST',
-            body: JSON.stringify({ strategy_names: checked, iterations, circuit: currentCircuit })
+            body: JSON.stringify({ strategy_names: checked, iterations, circuit: currentCircuit, weather: mcWeather })
         });
         displayMCResults(data);
     } catch (error) {
@@ -901,30 +940,31 @@ function updatePedalGauge(kind, rawValue) {
 }
 
 function updateTireCondition(point) {
-    const grip = Number(point.grip);
-    const healthFromGrip = Number.isFinite(grip)
-        ? Math.round(clamp(((grip - 0.5) / 0.5) * 100, 0, 100))
-        : null;
-    const healthPct = healthFromGrip ?? (Number.isFinite(Number(point.tire_health_pct))
-        ? Math.round(clamp(Number(point.tire_health_pct), 0, 100))
-        : 0);
-    const ringColor = point.tire_health_color || getTireHealthColor(healthPct);
-    const compound = point.compound || '-';
-    const compoundColor = getCompoundColor(compound);
-    const status = getTireHealthStatus(healthPct);
-    const tireAge = Number(point.tire_age);
+    const tireAge = Number(point.tire_age) || 0;
+    const compound = point.compound || 'Medium';
+    const cliffAge = CLIFF_AGES[compound] || 25;
+    const baseHealth = Math.round(clamp(100 - (tireAge / cliffAge) * 100, 0, 100));
     const tireAgeLabel = Number.isFinite(tireAge) ? `${tireAge} lap` : '0 lap';
 
-    setText('telemetry-health-value', `${healthPct}%`);
-    setText('telemetry-health-status', status);
     setText('telemetry-compound-value', compound);
     setText('telemetry-tire-age-value', tireAgeLabel);
 
-    const ring = document.getElementById('telemetry-tire-ring');
-    if (ring) {
-        ring.style.setProperty('--ring-value', `${healthPct}%`);
-        ring.style.setProperty('--ring-color', ringColor);
-        ring.style.setProperty('--compound-color', compoundColor);
+    // Update 4 separate tires with individual wear factors
+    for (const [pos, factor] of Object.entries(TIRE_WEAR_FACTORS)) {
+        const pct = Math.round(clamp(baseHealth * factor, 0, 100));
+        const color = getTireHealthColor(pct);
+        const cell = document.getElementById(`tire-${pos}`);
+        if (!cell) continue;
+        const ring = cell.querySelector('.tire-ring-sm');
+        const strong = cell.querySelector('strong');
+        if (ring) {
+            ring.style.setProperty('--ring-value', `${pct}%`);
+            ring.style.setProperty('--ring-color', color);
+        }
+        if (strong) {
+            strong.textContent = `${pct}%`;
+            strong.style.color = color;
+        }
     }
 }
 
@@ -1473,3 +1513,119 @@ function drawRoundRect(ctx, x, y, width, height, radius) {
     ctx.closePath();
 }
 
+// ======================== WEATHER SELECTOR ========================
+function initAllWeatherSelectors() {
+    document.querySelectorAll('.weather-selector').forEach(selector => {
+        selector.addEventListener('click', event => {
+            const btn = event.target.closest('.weather-btn');
+            if (!btn) return;
+            selector.querySelectorAll('.weather-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            // Update global weather for the simulator tab
+            if (selector.id === 'weather-selector') {
+                currentWeather = btn.dataset.weather;
+            }
+        });
+    });
+}
+
+function getWeatherFromSelector(selectorId) {
+    const selector = document.getElementById(selectorId);
+    if (!selector) return 'sunny';
+    const active = selector.querySelector('.weather-btn.active');
+    return active ? active.dataset.weather : 'sunny';
+}
+
+// ======================== WARNING TOAST ========================
+function initWarningToast() {
+    const closeBtn = document.getElementById('warning-toast-close');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            document.getElementById('warning-toast').classList.add('hidden');
+        });
+    }
+}
+
+function showWarning(msg) {
+    const toast = document.getElementById('warning-toast');
+    const msgEl = document.getElementById('warning-toast-msg');
+    if (toast && msgEl) {
+        msgEl.textContent = msg;
+        toast.classList.remove('hidden');
+        setTimeout(() => toast.classList.add('hidden'), 6000);
+    }
+}
+
+// ======================== CUSTOM STRATEGY BUILDER ========================
+function initCustomStrategyBuilder() {
+    if (customStintInitialized) return;
+    const addBtn = document.getElementById('btn-add-stint');
+    if (!addBtn) return;
+
+    addBtn.addEventListener('click', () => {
+        const container = document.getElementById('custom-stints-container');
+        const rows = container.querySelectorAll('.custom-stint-row');
+        const num = rows.length + 1;
+        const row = document.createElement('div');
+        row.className = 'custom-stint-row';
+        row.innerHTML = `
+            <label class="stint-number">${num}</label>
+            <select class="custom-compound-select select-input">
+                <option value="Soft">Soft</option><option value="Medium">Medium</option><option value="Hard" selected>Hard</option>
+                <option value="Intermediate">Intermediate</option><option value="Wet">Wet</option>
+            </select>
+            <input type="number" class="custom-stint-laps" placeholder="Laps" min="1" max="78" value="15">
+            <button class="btn-remove-stint" type="button">&times;</button>
+        `;
+        container.appendChild(row);
+        updateCustomLapsLabel();
+    });
+
+    document.getElementById('custom-stints-container').addEventListener('click', event => {
+        if (event.target.closest('.btn-remove-stint')) {
+            const row = event.target.closest('.custom-stint-row');
+            const container = document.getElementById('custom-stints-container');
+            if (container.querySelectorAll('.custom-stint-row').length > 1) {
+                row.remove();
+                renumberStints();
+                updateCustomLapsLabel();
+            }
+        }
+    });
+
+    document.getElementById('custom-stints-container').addEventListener('input', () => {
+        updateCustomLapsLabel();
+    });
+
+    customStintInitialized = true;
+}
+
+function renumberStints() {
+    document.querySelectorAll('#custom-stints-container .custom-stint-row').forEach((row, i) => {
+        const label = row.querySelector('.stint-number');
+        if (label) label.textContent = i + 1;
+    });
+}
+
+function updateCustomLapsLabel() {
+    const total = gatherCustomStints().reduce((sum, s) => sum + s.laps, 0);
+    const label = document.getElementById('custom-total-laps-label');
+    if (label) label.textContent = `Total: ${total} laps`;
+}
+
+function gatherCustomStints() {
+    const rows = document.querySelectorAll('#custom-stints-container .custom-stint-row');
+    const stints = [];
+    rows.forEach(row => {
+        const compound = row.querySelector('.custom-compound-select')?.value || 'Medium';
+        const laps = parseInt(row.querySelector('.custom-stint-laps')?.value, 10) || 10;
+        stints.push({ compound, laps });
+    });
+    return stints;
+}
+
+function getStrategyStints(strategyName) {
+    const strategy = allStrategies.find(s => s.name === strategyName);
+    if (!strategy) return [];
+    return strategy.stints.map(s => ({ compound: s.compound, laps: s.length }));
+}

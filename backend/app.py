@@ -27,12 +27,32 @@ FRONTEND_DIR = os.path.join(ROOT_DIR, "frontend")
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="")
 CORS(app)
 
+WEATHER_WETNESS = {
+    "sunny": 0.0,
+    "cloudy": 0.1,
+    "rain": 0.7,
+    "heavy_rain": 1.0,
+}
+
 
 def get_strategy_by_name(name: str, circuit_name: str):
     for strategy in load_all_strategies(circuit_name):
         if strategy.name == name:
             return strategy
     return None
+
+
+def _resolve_strategy(data: dict, circuit_name: str):
+    """Return a Strategy from either strategy_name or custom_stints."""
+    from core.strategy import Strategy as StrategyClass
+    custom_stints = data.get("custom_stints")
+    if custom_stints:
+        total_laps = int(get_circuit_config(circuit_name)["total_laps"])
+        return StrategyClass.from_custom_stints(custom_stints, total_laps)
+    strategy_name = data.get("strategy_name")
+    if not strategy_name:
+        return None
+    return get_strategy_by_name(strategy_name, circuit_name)
 
 
 @app.route("/api/circuits", methods=["GET"])
@@ -110,14 +130,13 @@ def get_degradation():
 @app.route("/api/simulate/deterministic", methods=["POST"])
 def simulate_deterministic():
     data = request.get_json(silent=True) or {}
-    strategy_name = data.get("strategy_name")
     circuit_name = data.get("circuit", "Silverstone")
-    if not strategy_name:
-        return jsonify({"error": "Missing 'strategy_name' in request body"}), 400
+    weather = data.get("weather", "sunny")
+    track_wetness = WEATHER_WETNESS.get(weather, 0.0)
 
-    strategy = get_strategy_by_name(strategy_name, circuit_name)
+    strategy = _resolve_strategy(data, circuit_name)
     if strategy is None:
-        return jsonify({"error": f"Strategy '{strategy_name}' not found for circuit '{circuit_name}'"}), 404
+        return jsonify({"error": "Missing 'strategy_name' or 'custom_stints' in request body"}), 400
 
     try:
         simulator = RaceSimulator(
@@ -125,6 +144,7 @@ def simulate_deterministic():
             circuit_name=circuit_name,
             enable_variability=False,
             enable_safety_car=False,
+            track_wetness=track_wetness,
         )
         df = simulator.simulate()
         summary = simulator.get_summary()
@@ -143,17 +163,16 @@ def simulate_deterministic():
 @app.route("/api/simulate/telemetry", methods=["POST"])
 def simulate_telemetry():
     data = request.get_json(silent=True) or {}
-    strategy_name = data.get("strategy_name")
     circuit_name = data.get("circuit", "Silverstone")
     timestep_s = float(data.get("timestep_s", 0.5))
     max_points = data.get("max_points")
     response_shape = str(data.get("response_shape", "v2")).lower()
-    if not strategy_name:
-        return jsonify({"error": "Missing 'strategy_name' in request body"}), 400
+    weather = data.get("weather", "sunny")
+    track_wetness = WEATHER_WETNESS.get(weather, 0.0)
 
-    strategy = get_strategy_by_name(strategy_name, circuit_name)
+    strategy = _resolve_strategy(data, circuit_name)
     if strategy is None:
-        return jsonify({"error": f"Strategy '{strategy_name}' not found for circuit '{circuit_name}'"}), 404
+        return jsonify({"error": "Missing 'strategy_name' or 'custom_stints' in request body"}), 400
 
     try:
         simulator = RaceSimulator(
@@ -161,6 +180,7 @@ def simulate_telemetry():
             circuit_name=circuit_name,
             enable_variability=False,
             enable_safety_car=False,
+            track_wetness=track_wetness,
         )
         df = simulator.simulate()
         summary = simulator.get_summary()
@@ -168,6 +188,8 @@ def simulate_telemetry():
 
         result = {
             "circuit": circuit_name,
+            "weather": weather,
+            "track_wetness": track_wetness,
             "strategy": strategy.as_dict(),
             "summary": summary,
             "laps": df.to_dict(orient="records"),
@@ -180,9 +202,11 @@ def simulate_telemetry():
         if response_shape == "legacy":
             return jsonify(result)
 
+        strategy_name = data.get("strategy_name", strategy.name)
         request_echo = {
             "strategy_name": strategy_name,
             "circuit": circuit_name,
+            "weather": weather,
             "timestep_s": timestep_s,
             "max_points": max_points,
             "response_shape": "v2",
@@ -213,21 +237,37 @@ def simulate_telemetry():
 def compare_strategies():
     data = request.get_json(silent=True) or {}
     strategy_names = data.get("strategy_names", [])
+    custom_stints_list = data.get("custom_stints_list", [])  # list of {name, stints}
     circuit_name = data.get("circuit", "Silverstone")
-    if len(strategy_names) < 2:
+    weather = data.get("weather", "sunny")
+    track_wetness = WEATHER_WETNESS.get(weather, 0.0)
+    total_laps = int(get_circuit_config(circuit_name)["total_laps"])
+
+    strategies = []
+    for name in strategy_names:
+        strategy = get_strategy_by_name(name, circuit_name)
+        if strategy is None:
+            return jsonify({"error": f"Strategy '{name}' not found"}), 404
+        strategies.append(strategy)
+
+    from core.strategy import Strategy as StrategyClass
+    for custom in custom_stints_list:
+        cs = StrategyClass.from_custom_stints(
+            custom["stints"], total_laps, name=custom.get("name", "Custom")
+        )
+        strategies.append(cs)
+
+    if len(strategies) < 2:
         return jsonify({"error": "Please select at least two strategies"}), 400
 
     rows = []
-    for strategy_name in strategy_names:
-        strategy = get_strategy_by_name(strategy_name, circuit_name)
-        if strategy is None:
-            return jsonify({"error": f"Strategy '{strategy_name}' not found"}), 404
-
+    for strategy in strategies:
         simulator = RaceSimulator(
             strategy=strategy,
             circuit_name=circuit_name,
             enable_variability=False,
             enable_safety_car=False,
+            track_wetness=track_wetness,
         )
         simulator.simulate()
         summary = simulator.get_summary()
@@ -257,10 +297,12 @@ def compare_strategies():
 def simulate_monte_carlo():
     data = request.get_json(silent=True) or {}
     strategy_names = data.get("strategy_names", [])
+    custom_stints_list = data.get("custom_stints_list", [])
     circuit_name = data.get("circuit", "Silverstone")
+    weather = data.get("weather", "sunny")
+    track_wetness = WEATHER_WETNESS.get(weather, 0.0)
     iterations = int(np.clip(data.get("iterations", 500), 100, 2000))
-    if not strategy_names:
-        return jsonify({"error": "Please select at least one strategy"}), 400
+    total_laps = int(get_circuit_config(circuit_name)["total_laps"])
 
     strategies = []
     for name in strategy_names:
@@ -268,6 +310,16 @@ def simulate_monte_carlo():
         if strategy is None:
             return jsonify({"error": f"Strategy '{name}' not found"}), 404
         strategies.append(strategy)
+
+    from core.strategy import Strategy as StrategyClass
+    for custom in custom_stints_list:
+        cs = StrategyClass.from_custom_stints(
+            custom["stints"], total_laps, name=custom.get("name", "Custom")
+        )
+        strategies.append(cs)
+
+    if not strategies:
+        return jsonify({"error": "Please select at least one strategy"}), 400
 
     try:
         mc = MonteCarloSimulator(
