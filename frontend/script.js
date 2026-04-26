@@ -34,16 +34,22 @@ let currentWeather = 'sunny';
 let customStintInitialized = false;
 
 const DRY_TIRES = ['Soft', 'Medium', 'Hard'];
-const TIRE_WEAR_FACTORS = { FL: 0.98, FR: 0.97, RL: 0.96, RR: 0.95 };
-const CLIFF_AGES = { Soft: 18, Medium: 28, Hard: 40, Intermediate: 24, Wet: 20 };
-
+const PLAY_BUTTON_HTML = '\u25b6 Play';
+const PAUSE_BUTTON_HTML = '\u23f8 Pause';
 
 const telemetryState = {
     points: [],
     trackMap: null,
     frameIndex: 0,
-    timer: null,
-    playing: false
+    rafId: null,
+    playing: false,
+    playbackSpeed: 1,
+    playbackTime: 0,
+    wallClockStart: null,
+    simTimeAtStart: 0,
+    dnfFrame: -1,
+    dnfTime: Infinity,
+    timestepS: 0.5
 };
 
 let minimapRenderRequest = null;
@@ -777,14 +783,20 @@ function displayMCResults(data) {
 }
 
 function resetTelemetryState() {
-    if (telemetryState.timer) {
-        clearInterval(telemetryState.timer);
+    if (telemetryState.rafId) {
+        cancelAnimationFrame(telemetryState.rafId);
     }
     telemetryState.points = [];
     telemetryState.trackMap = null;
     telemetryState.frameIndex = 0;
-    telemetryState.timer = null;
+    telemetryState.rafId = null;
     telemetryState.playing = false;
+    telemetryState.playbackTime = 0;
+    telemetryState.wallClockStart = null;
+    telemetryState.simTimeAtStart = 0;
+    telemetryState.dnfFrame = -1;
+    telemetryState.dnfTime = Infinity;
+    telemetryState.timestepS = 0.5;
     minimapLastFrameIndex = -1;
     window.carTrail = [];
     if (minimapRenderRequest) {
@@ -804,12 +816,14 @@ function resetTelemetryState() {
         frameLabel.textContent = 'Frame 0 / 0';
     }
     if (playBtn) {
-        playBtn.textContent = 'Play';
+        playBtn.innerHTML = PLAY_BUTTON_HTML;
     }
     if (sampling) {
         sampling.textContent = 'Sampling: -';
     }
 
+    hideDNFOverlay();
+    updatePlaybackSpeedButtons();
     updateTelemetryWidgets({}, 0);
     drawMiniMap(null, null);
 }
@@ -821,6 +835,7 @@ function initTelemetryControls() {
 
     const playBtn = document.getElementById('btn-telemetry-play');
     const scrub = document.getElementById('telemetry-scrub');
+    const dnfCloseBtn = document.getElementById('btn-dnf-close');
 
     playBtn.addEventListener('click', () => {
         if (telemetryState.playing) {
@@ -832,23 +847,52 @@ function initTelemetryControls() {
 
     scrub.addEventListener('input', event => {
         const index = Number(event.target.value);
-        drawTelemetryFrame(index);
+        const point = telemetryState.points[index];
+        const simTime = getTelemetryPointTime(point, index);
+        telemetryState.playbackTime = simTime;
+        if (telemetryState.playing) {
+            telemetryState.simTimeAtStart = simTime;
+            telemetryState.wallClockStart = performance.now();
+        }
+        drawTelemetryAtTime(simTime);
     });
 
+    document.querySelectorAll('.speed-btn').forEach(btn => {
+        btn.addEventListener('click', () => setPlaybackSpeed(parseFloat(btn.dataset.speed)));
+    });
+
+    dnfCloseBtn?.addEventListener('click', hideDNFOverlay);
+
+    updatePlaybackSpeedButtons();
     telemetryControlInitialized = true;
 }
 
 function renderTelemetryPlayback(data) {
     initTelemetryControls();
     stopTelemetryPlayback();
+    hideDNFOverlay();
 
     const points = data.telemetry || [];
+    const sampling = data.sampling || {};
     telemetryState.points = points;
     telemetryState.trackMap = data.track_map || null;
     telemetryState.frameIndex = 0;
+    telemetryState.playbackTime = 0;
+    telemetryState.wallClockStart = null;
+    telemetryState.simTimeAtStart = 0;
+    telemetryState.timestepS = Number(sampling.applied_timestep_s) || 0.5;
+    telemetryState.dnfFrame = -1;
+    telemetryState.dnfTime = Infinity;
+    for (let i = 0; i < points.length; i += 1) {
+        const health = computeTireHealth(points[i]);
+        if (Math.min(...Object.values(health)) <= 0) {
+            telemetryState.dnfFrame = i;
+            telemetryState.dnfTime = getTelemetryPointTime(points[i], i);
+            break;
+        }
+    }
 
     const scrub = document.getElementById('telemetry-scrub');
-    const sampling = data.sampling || {};
     scrub.max = Math.max(points.length - 1, 0);
     scrub.value = 0;
     document.getElementById('telemetry-sampling').textContent =
@@ -860,35 +904,80 @@ function renderTelemetryPlayback(data) {
         return;
     }
 
-    drawTelemetryFrame(0);
+    drawTelemetryAtTime(0);
 }
 
 function startTelemetryPlayback() {
     if (!telemetryState.points.length) {
         return;
     }
+    const lastIndex = telemetryState.points.length - 1;
+    const maxTime = getTelemetryPointTime(telemetryState.points[lastIndex], lastIndex);
+    if (telemetryState.dnfFrame >= 0 && telemetryState.playbackTime >= telemetryState.dnfTime) {
+        telemetryState.playbackTime = telemetryState.dnfTime;
+        drawTelemetryAtTime(telemetryState.dnfTime);
+        stopTelemetryPlayback();
+        showDNFOverlay(telemetryState.points[telemetryState.dnfFrame]);
+        return;
+    }
+    if (telemetryState.playbackTime >= maxTime) {
+        telemetryState.playbackTime = maxTime;
+        drawTelemetryAtTime(maxTime);
+        stopTelemetryPlayback();
+        return;
+    }
+    if (telemetryState.rafId) {
+        cancelAnimationFrame(telemetryState.rafId);
+    }
     telemetryState.playing = true;
-    document.getElementById('btn-telemetry-play').textContent = 'Pause';
-    telemetryState.timer = setInterval(() => {
-        const nextIndex = telemetryState.frameIndex + 1;
-        if (nextIndex >= telemetryState.points.length) {
+    telemetryState.wallClockStart = performance.now();
+    telemetryState.simTimeAtStart = telemetryState.playbackTime;
+    document.getElementById('btn-telemetry-play').innerHTML = PAUSE_BUTTON_HTML;
+    hideDNFOverlay();
+
+    function tick(now) {
+        if (!telemetryState.playing) {
+            return;
+        }
+
+        const elapsed = (now - telemetryState.wallClockStart) / 1000;
+        const simTime = telemetryState.simTimeAtStart + (elapsed * telemetryState.playbackSpeed);
+
+        if (telemetryState.dnfFrame >= 0 && simTime >= telemetryState.dnfTime) {
+            telemetryState.playbackTime = telemetryState.dnfTime;
+            drawTelemetryAtTime(telemetryState.dnfTime);
+            stopTelemetryPlayback();
+            showDNFOverlay(telemetryState.points[telemetryState.dnfFrame]);
+            return;
+        }
+
+        if (simTime >= maxTime) {
+            telemetryState.playbackTime = maxTime;
+            drawTelemetryAtTime(maxTime);
             stopTelemetryPlayback();
             return;
         }
-        drawTelemetryFrame(nextIndex);
-    }, 45);
+
+        telemetryState.playbackTime = simTime;
+        drawTelemetryAtTime(simTime);
+        telemetryState.rafId = requestAnimationFrame(tick);
+    }
+
+    telemetryState.rafId = requestAnimationFrame(tick);
 }
 
 function stopTelemetryPlayback() {
     telemetryState.playing = false;
-    if (telemetryState.timer) {
-        clearInterval(telemetryState.timer);
-        telemetryState.timer = null;
+    if (telemetryState.rafId) {
+        cancelAnimationFrame(telemetryState.rafId);
+        telemetryState.rafId = null;
     }
     const playBtn = document.getElementById('btn-telemetry-play');
     if (playBtn) {
-        playBtn.textContent = 'Play';
+        playBtn.innerHTML = PLAY_BUTTON_HTML;
     }
+    telemetryState.wallClockStart = null;
+    telemetryState.simTimeAtStart = telemetryState.playbackTime;
 }
 
 function drawTelemetryFrame(index) {
@@ -896,14 +985,83 @@ function drawTelemetryFrame(index) {
         return;
     }
     const safeIndex = Math.max(0, Math.min(index, telemetryState.points.length - 1));
-    telemetryState.frameIndex = safeIndex;
-    const point = telemetryState.points[safeIndex];
+    const simTime = getTelemetryPointTime(telemetryState.points[safeIndex], safeIndex);
+    telemetryState.playbackTime = simTime;
+    drawTelemetryAtTime(simTime);
+}
 
-    document.getElementById('telemetry-scrub').value = safeIndex;
-    document.getElementById('telemetry-frame-label').textContent = `Frame ${safeIndex + 1} / ${telemetryState.points.length}`;
+function getTelemetryPointTime(point, index = 0) {
+    return Number(point?.t ?? point?.time_s ?? (index * telemetryState.timestepS));
+}
 
-    updateTelemetryWidgets(point, safeIndex);
-    drawMiniMap(telemetryState.trackMap, point);
+function findFrameIndexAtTime(simTime) {
+    const points = telemetryState.points;
+    if (!points.length) {
+        return 0;
+    }
+    let lo = 0;
+    let hi = points.length - 1;
+    while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (getTelemetryPointTime(points[mid], mid) <= simTime) {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return lo;
+}
+
+function interpolatePoint(p0, p1, alpha) {
+    function lerp(a, b) {
+        const na = Number(a);
+        const nb = Number(b);
+        if (!Number.isFinite(na) || !Number.isFinite(nb)) {
+            return a;
+        }
+        return na + ((nb - na) * alpha);
+    }
+
+    return {
+        ...p0,
+        progress: lerp(p0.progress ?? p0.lap_progress, p1.progress ?? p1.lap_progress),
+        lap_progress: lerp(p0.lap_progress, p1.lap_progress),
+        speed_kmh: lerp(p0.speed_kmh, p1.speed_kmh),
+        throttle: lerp(p0.throttle, p1.throttle),
+        brake: lerp(p0.brake, p1.brake),
+        t: lerp(p0.t ?? p0.time_s, p1.t ?? p1.time_s)
+    };
+}
+
+function drawTelemetryAtTime(simTime) {
+    const points = telemetryState.points;
+    if (!points.length) {
+        return;
+    }
+
+    const idx = findFrameIndexAtTime(simTime);
+    const nextIdx = Math.min(idx + 1, points.length - 1);
+    const p0 = points[idx];
+    const p1 = points[nextIdx];
+    const t0 = getTelemetryPointTime(p0, idx);
+    const t1 = getTelemetryPointTime(p1, nextIdx);
+    const alpha = t1 > t0 ? clamp((simTime - t0) / (t1 - t0), 0, 1) : 0;
+    const interpolatedPoint = interpolatePoint(p0, p1, alpha);
+
+    const scrub = document.getElementById('telemetry-scrub');
+    if (scrub) {
+        scrub.value = idx;
+    }
+    document.getElementById('telemetry-frame-label').textContent = `t=${simTime.toFixed(1)}s | Frame ${idx + 1} / ${points.length}`;
+
+    telemetryState.frameIndex = idx;
+
+    if (telemetryState.dnfFrame < 0 || simTime < telemetryState.dnfTime) {
+        hideDNFOverlay();
+    }
+
+    updateTelemetryWidgets(p0, idx);
+    drawMiniMap(telemetryState.trackMap, interpolatedPoint);
 }
 
 function updateTelemetryWidgets(point, index = 0) {
@@ -918,7 +1076,7 @@ function updateTelemetryHeader(point, index) {
     const circuit = telemetryState.trackMap?.circuit || currentCircuit || '-';
     const lap = point.lap ?? '-';
     const speed = Math.round(Number(point.speed_kmh) || 0);
-    const time = Number(point.t ?? point.time_s ?? (index * 0.5));
+    const time = getTelemetryPointTime(point, index);
     const pitText = (point.is_pit_lap || point.in_pit) ? 'PIT' : 'RACE';
 
     setText('telemetry-circuit-label', circuit);
@@ -939,33 +1097,83 @@ function updatePedalGauge(kind, rawValue) {
     }
 }
 
+function computeTireHealth(point) {
+    const compound = point?.compound || 'Medium';
+    const tireAge = Math.max(0, Number(point?.tire_age) || 0);
+    const cliffMap = { Soft: 18, Medium: 28, Hard: 40, Intermediate: 24, Wet: 20 };
+    const cliff = cliffMap[compound] || 25;
+    const initialGripMap = { Soft: 1.00, Medium: 0.97, Hard: 0.94, Intermediate: 0.95, Wet: 0.91 };
+    const initialGrip = initialGripMap[compound] || 0.97;
+    const grip = Number(point?.grip);
+
+    let baseHealth;
+    if (Number.isFinite(grip) && grip > 0) {
+        baseHealth = clamp(((grip - 0.50) / (initialGrip - 0.50)) * 100, 0, 100);
+    } else {
+        baseHealth = clamp(100 - (tireAge / (cliff * 2)) * 100, 0, 100);
+    }
+
+    const ageCap = clamp(100 - (tireAge / cliff) * 50, 0, 100);
+    baseHealth = Math.min(baseHealth, ageCap);
+
+    const tireWearBias = { FL: 0.97, FR: 0.96, RL: 0.94, RR: 0.93 };
+    return {
+        FL: Math.round(clamp(baseHealth * tireWearBias.FL, 0, 100)),
+        FR: Math.round(clamp(baseHealth * tireWearBias.FR, 0, 100)),
+        RL: Math.round(clamp(baseHealth * tireWearBias.RL, 0, 100)),
+        RR: Math.round(clamp(baseHealth * tireWearBias.RR, 0, 100))
+    };
+}
+
 function updateTireCondition(point) {
-    const tireAge = Number(point.tire_age) || 0;
-    const compound = point.compound || 'Medium';
-    const cliffAge = CLIFF_AGES[compound] || 25;
-    const baseHealth = Math.round(clamp(100 - (tireAge / cliffAge) * 100, 0, 100));
-    const tireAgeLabel = Number.isFinite(tireAge) ? `${tireAge} lap` : '0 lap';
+    const hasPoint = point && Object.keys(point).length > 0;
+    if (!hasPoint) {
+        ['FL', 'FR', 'RL', 'RR'].forEach(pos => {
+            const ring = document.getElementById(`tire-ring-${pos}`);
+            const label = document.getElementById(`tire-pct-${pos}`);
+            if (ring) {
+                ring.style.setProperty('--ring-value', '100%');
+                ring.style.setProperty('--ring-color', getTireHealthColor(100));
+                ring.style.setProperty('--compound-color', '#666666');
+            }
+            if (label) {
+                label.textContent = '100%';
+                label.style.color = getTireHealthColor(100);
+            }
+        });
+        setText('telemetry-health-value', '0%');
+        setText('telemetry-health-status', 'CLIFF');
+        setText('telemetry-compound-value', '-');
+        setText('telemetry-tire-age-value', '0 lap');
+        return;
+    }
 
-    setText('telemetry-compound-value', compound);
-    setText('telemetry-tire-age-value', tireAgeLabel);
+    const health = computeTireHealth(point);
+    const avgHealth = Math.round((health.FL + health.FR + health.RL + health.RR) / 4);
+    const compound = point.compound || '-';
+    const compoundColor = getCompoundColor(compound);
+    const status = getTireHealthStatus(avgHealth);
 
-    // Update 4 separate tires with individual wear factors
-    for (const [pos, factor] of Object.entries(TIRE_WEAR_FACTORS)) {
-        const pct = Math.round(clamp(baseHealth * factor, 0, 100));
+    ['FL', 'FR', 'RL', 'RR'].forEach(pos => {
+        const pct = health[pos];
         const color = getTireHealthColor(pct);
-        const cell = document.getElementById(`tire-${pos}`);
-        if (!cell) continue;
-        const ring = cell.querySelector('.tire-ring-sm');
-        const strong = cell.querySelector('strong');
+        const ring = document.getElementById(`tire-ring-${pos}`);
+        const strong = document.getElementById(`tire-pct-${pos}`);
         if (ring) {
             ring.style.setProperty('--ring-value', `${pct}%`);
             ring.style.setProperty('--ring-color', color);
+            ring.style.setProperty('--compound-color', compoundColor);
         }
         if (strong) {
             strong.textContent = `${pct}%`;
             strong.style.color = color;
         }
-    }
+    });
+
+    setText('telemetry-health-value', `${avgHealth}%`);
+    setText('telemetry-health-status', status);
+    setText('telemetry-compound-value', compound);
+    setText('telemetry-tire-age-value', `${Number(point.tire_age) || 0} lap`);
 }
 
 function updateTireTemperature(point) {
@@ -1028,6 +1236,49 @@ function getTemperatureState(temp) {
 function getCompoundColor(compound) {
     const color = COMPOUND_COLORS[compound] || '#cccccc';
     return color === '#FFFFFF' ? '#ffffff' : color;
+}
+
+function updatePlaybackSpeedButtons() {
+    document.querySelectorAll('.speed-btn').forEach(btn => {
+        const buttonSpeed = parseFloat(btn.dataset.speed);
+        btn.classList.toggle('active', buttonSpeed === telemetryState.playbackSpeed);
+    });
+}
+
+function setPlaybackSpeed(speed) {
+    const safeSpeed = Number(speed);
+    if (!Number.isFinite(safeSpeed)) {
+        return;
+    }
+    const wasPlaying = telemetryState.playing;
+    if (wasPlaying) {
+        stopTelemetryPlayback();
+    }
+    telemetryState.playbackSpeed = safeSpeed;
+    updatePlaybackSpeedButtons();
+    if (wasPlaying) {
+        startTelemetryPlayback();
+    }
+}
+
+function hideDNFOverlay() {
+    document.getElementById('dnf-overlay')?.classList.add('hidden');
+}
+
+function showDNFOverlay(point) {
+    if (!point) {
+        return;
+    }
+    const health = computeTireHealth(point);
+    const [worstTire, worstPct] = Object.entries(health)
+        .sort((left, right) => left[1] - right[1])[0] || ['-', 0];
+    const lap = point.lap ?? '-';
+    const compound = point.compound || '-';
+    const tireAge = Number(point.tire_age) || 0;
+
+    setText('dnf-lap', lap);
+    setText('dnf-detail', `Compound ${compound} | Worst tire ${worstTire} (${worstPct}%) | Tire age ${tireAge} lap`);
+    document.getElementById('dnf-overlay')?.classList.remove('hidden');
 }
 
 function setText(id, value) {

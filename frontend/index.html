@@ -206,8 +206,26 @@
 
                 <div class="chart-card chart-full telemetry-card" id="telemetry-panel">
                     <h3>Telemetry Playback</h3>
+                    <div class="dnf-overlay hidden" id="dnf-overlay">
+                        <div class="dnf-box">
+                            <div class="dnf-icon">⚠️</div>
+                            <div class="dnf-title">DNF - BAN HABIS</div>
+                            <div class="dnf-message">Ban mencapai 0% pada Lap <span id="dnf-lap">-</span>. Mobil tidak dapat melanjutkan balapan.</div>
+                            <div class="dnf-detail" id="dnf-detail"></div>
+                            <button class="btn-primary" id="btn-dnf-close" type="button">Tutup</button>
+                        </div>
+                    </div>
                     <div class="telemetry-toolbar">
-                        <button class="btn-primary telemetry-btn" id="btn-telemetry-play" type="button">Play</button>
+                        <button class="btn-primary telemetry-btn" id="btn-telemetry-play" type="button">▶ Play</button>
+                        <div class="speed-controls">
+                            <span class="speed-label">SPEED</span>
+                            <button class="speed-btn" data-speed="0.25" type="button">0.25×</button>
+                            <button class="speed-btn" data-speed="0.5" type="button">0.5×</button>
+                            <button class="speed-btn active" data-speed="1" type="button">1×</button>
+                            <button class="speed-btn" data-speed="2" type="button">2×</button>
+                            <button class="speed-btn" data-speed="4" type="button">4×</button>
+                            <button class="speed-btn" data-speed="8" type="button">8×</button>
+                        </div>
                         <input type="range" id="telemetry-scrub" class="slider-input telemetry-scrub" min="0" max="0" value="0" step="1" aria-label="Telemetry frame scrubber">
                         <div class="telemetry-frame" id="telemetry-frame-label">Frame 0 / 0</div>
                     </div>
@@ -242,46 +260,50 @@
                             <span class="pedal-name">REM</span>
                         </div>
 
-                        <!-- 4 Separate Tire Indicators -->
                         <div class="telemetry-widget telemetry-tire-widget four-tires">
-                            <span class="telemetry-label">Tire Cond.</span>
-                            <div class="tire-grid-4">
-                                <div class="tire-cell" id="tire-FL">
-                                    <div class="tire-ring-sm" style="--ring-color:#00e676;--ring-value:100%">
-                                        <div class="tire-ring-sm-inner">
-                                            <strong>100%</strong>
-                                            <span>FL</span>
+                            <span class="telemetry-label">Tire Condition</span>
+                            <div class="tire-four-grid">
+                                <div class="tire-cell">
+                                    <div class="tire-ring-sm" id="tire-ring-FL" style="--ring-color:#00e676;--compound-color:#666;--ring-value:100%">
+                                        <div class="tire-ring-inner-sm">
+                                            <strong id="tire-pct-FL">100%</strong>
                                         </div>
                                     </div>
+                                    <span class="tire-pos-label">FL</span>
                                 </div>
-                                <div class="tire-cell" id="tire-FR">
-                                    <div class="tire-ring-sm" style="--ring-color:#00e676;--ring-value:100%">
-                                        <div class="tire-ring-sm-inner">
-                                            <strong>100%</strong>
-                                            <span>FR</span>
+                                <div class="tire-cell">
+                                    <div class="tire-ring-sm" id="tire-ring-FR" style="--ring-color:#00e676;--compound-color:#666;--ring-value:100%">
+                                        <div class="tire-ring-inner-sm">
+                                            <strong id="tire-pct-FR">100%</strong>
                                         </div>
                                     </div>
+                                    <span class="tire-pos-label">FR</span>
                                 </div>
-                                <div class="tire-cell" id="tire-RL">
-                                    <div class="tire-ring-sm" style="--ring-color:#00e676;--ring-value:100%">
-                                        <div class="tire-ring-sm-inner">
-                                            <strong>100%</strong>
-                                            <span>RL</span>
+                                <div class="tire-cell">
+                                    <div class="tire-ring-sm" id="tire-ring-RL" style="--ring-color:#00e676;--compound-color:#666;--ring-value:100%">
+                                        <div class="tire-ring-inner-sm">
+                                            <strong id="tire-pct-RL">100%</strong>
                                         </div>
                                     </div>
+                                    <span class="tire-pos-label">RL</span>
                                 </div>
-                                <div class="tire-cell" id="tire-RR">
-                                    <div class="tire-ring-sm" style="--ring-color:#00e676;--ring-value:100%">
-                                        <div class="tire-ring-sm-inner">
-                                            <strong>100%</strong>
-                                            <span>RR</span>
+                                <div class="tire-cell">
+                                    <div class="tire-ring-sm" id="tire-ring-RR" style="--ring-color:#00e676;--compound-color:#666;--ring-value:100%">
+                                        <div class="tire-ring-inner-sm">
+                                            <strong id="tire-pct-RR">100%</strong>
                                         </div>
                                     </div>
+                                    <span class="tire-pos-label">RR</span>
                                 </div>
                             </div>
                             <div class="tire-meta">
                                 <strong id="telemetry-compound-value">-</strong>
                                 <span id="telemetry-tire-age-value">0 lap</span>
+                            </div>
+                            <div class="tire-overall-row">
+                                <span class="telemetry-label">AVG</span>
+                                <strong id="telemetry-health-value">0%</strong>
+                                <span id="telemetry-health-status">CLIFF</span>
                             </div>
                         </div>
 
