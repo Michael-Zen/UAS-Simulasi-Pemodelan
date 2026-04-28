@@ -20,6 +20,7 @@ from core.race_simulator import RaceSimulator  # noqa: E402
 from core.strategy import load_all_strategies  # noqa: E402
 from core.tire_model import Tire  # noqa: E402
 from optimization.monte_carlo import MonteCarloSimulator  # noqa: E402
+from analysis.scenario_testing import ScenarioTester  # noqa: E402
 
 
 FRONTEND_DIR = os.path.join(ROOT_DIR, "frontend")
@@ -363,6 +364,160 @@ def simulate_monte_carlo():
                 "ranking": [result["name"] for result in results],
             }
         )
+    except Exception as exc:
+        return jsonify({"error": str(exc), "traceback": traceback.format_exc()}), 500
+
+
+@app.route("/api/scenarios/baseline", methods=["POST"])
+def scenario_baseline():
+    """
+    Run Baseline Scenario: 1-stop Medium → Hard
+    Paper: Strategi standar satu kali pit stop dengan urutan kompon Medium → Hard
+    """
+    data = request.get_json(silent=True) or {}
+    circuit_name = data.get("circuit", "Silverstone")
+    
+    try:
+        tester = ScenarioTester(circuit_name=circuit_name, random_seed=42)
+        result = tester.run_baseline_scenario()
+        return jsonify({
+            "meta": {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "status": "ok",
+                "scenario_type": "baseline"
+            },
+            "result": result
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc), "traceback": traceback.format_exc()}), 500
+
+
+@app.route("/api/scenarios/1stop-vs-2stop", methods=["POST"])
+def scenario_1stop_vs_2stop():
+    """
+    Run 1-Stop vs 2-Stop Scenario
+    Paper: Membandingkan total waktu antara strategi satu pit stop versus dua pit stop.
+    Tujuannya menentukan apakah kecepatan ban di awal sepadan dengan tambahan satu kali penalti pit lane.
+    """
+    data = request.get_json(silent=True) or {}
+    circuit_name = data.get("circuit", "Silverstone")
+    
+    try:
+        tester = ScenarioTester(circuit_name=circuit_name, random_seed=42)
+        result = tester.run_1_stop_vs_2_stop_scenario()
+        return jsonify({
+            "meta": {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "status": "ok",
+                "scenario_type": "1stop_vs_2stop"
+            },
+            "result": result
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc), "traceback": traceback.format_exc()}), 500
+
+
+@app.route("/api/scenarios/weather-transition", methods=["POST"])
+def scenario_weather_transition():
+    """
+    Run Weather Transition Scenario: Dry→Wet or Wet→Dry
+    Paper: Perubahan kondisi lintasan selama balapan berlangsung.
+    Tingkat pit stop saat perubahan cuaca merupakan faktor yang sangat menentukan total race time.
+    """
+    data = request.get_json(silent=True) or {}
+    circuit_name = data.get("circuit", "Silverstone")
+    transition_type = data.get("transition_type", "dry_to_wet")  # or "wet_to_dry"
+    transition_lap = data.get("transition_lap")
+    
+    circuit_config = get_circuit_config(circuit_name)
+    total_laps = int(circuit_config["total_laps"])
+    
+    if transition_lap is None:
+        transition_lap = int(round(total_laps * 0.5))
+    else:
+        transition_lap = min(max(int(transition_lap), 5), total_laps - 10)
+    
+    try:
+        tester = ScenarioTester(circuit_name=circuit_name, random_seed=42)
+        result = tester.run_weather_transition_scenario(
+            transition_type=transition_type,
+            transition_lap=transition_lap
+        )
+        return jsonify({
+            "meta": {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "status": "ok",
+                "scenario_type": "weather_transition"
+            },
+            "result": result
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc), "traceback": traceback.format_exc()}), 500
+
+
+@app.route("/api/scenarios/best-combination", methods=["POST"])
+def scenario_best_combination():
+    """
+    Run Best Combination Finder Scenario
+    Paper: Mencoba mengkombinasikan semua strategi di sirkuit yang telah dibuat
+    lalu mencarikan kombinasi terbaik yang menghasilkan total race time paling kecil.
+    """
+    data = request.get_json(silent=True) or {}
+    circuit_name = data.get("circuit", "Silverstone")
+    max_combinations = int(data.get("max_combinations", 30))
+    
+    try:
+        tester = ScenarioTester(circuit_name=circuit_name, random_seed=42)
+        result = tester.run_best_combination_scenario(max_combinations=max_combinations)
+        return jsonify({
+            "meta": {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "status": "ok",
+                "scenario_type": "best_combination"
+            },
+            "result": result
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc), "traceback": traceback.format_exc()}), 500
+
+
+@app.route("/api/scenarios/all", methods=["POST"])
+def run_all_scenarios():
+    """
+    Run ALL paper scenarios at once for comprehensive analysis.
+    Combines: Baseline, 1-Stop vs 2-Stop, Weather Transitions, Best Combination
+    """
+    data = request.get_json(silent=True) or {}
+    circuit_name = data.get("circuit", "Silverstone")
+    
+    try:
+        tester = ScenarioTester(circuit_name=circuit_name, random_seed=42)
+        
+        # Run all scenarios
+        baseline = tester.run_baseline_scenario()
+        comparison = tester.run_1_stop_vs_2_stop_scenario()
+        weather_dry_to_wet = tester.run_weather_transition_scenario("dry_to_wet")
+        weather_wet_to_dry = tester.run_weather_transition_scenario("wet_to_dry")
+        best_combo = tester.run_best_combination_scenario()
+        
+        summary = tester.get_all_results_summary()
+        
+        return jsonify({
+            "meta": {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "status": "ok",
+                "scenario_type": "comprehensive"
+            },
+            "circuit": circuit_name,
+            "scenarios": {
+                "baseline": baseline,
+                "1stop_vs_2stop": comparison,
+                "weather_dry_to_wet": weather_dry_to_wet,
+                "weather_wet_to_dry": weather_wet_to_dry,
+                "best_combination": best_combo
+            },
+            "summary": summary
+        })
     except Exception as exc:
         return jsonify({"error": str(exc), "traceback": traceback.format_exc()}), 500
 
